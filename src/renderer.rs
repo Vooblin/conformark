@@ -41,6 +41,7 @@ fn render_node(node: &Node) -> String {
                 )
             }
         }
+        Node::ThematicBreak => "<hr />\n".to_string(),
         Node::Text(text) => escape_html(text),
     }
 }
