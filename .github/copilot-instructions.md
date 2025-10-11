@@ -4,170 +4,101 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (2,667 lines - order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (2,970 lines - order matters!).
 
-**Where to focus next**: The largest remaining test sections are "Emphasis and strong emphasis" (132 tests), "Links" (90 tests), and "List items" (48 tests). Current blockers: nested lists, full emphasis delimiter algorithm, and edge cases in HTML blocks/links.
+**Current status**: 63.1% coverage (413/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, entity decoding in links, tab handling in lists.
 
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (63.1% baseline - 413/655 tests passing)
-2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
-3. Count tests in a section: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
-4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules (9,811 lines, 26 sections)
+1. Run `cargo test -- --nocapture` to see current coverage and failure examples
+2. Search test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
+3. Count section tests: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
+4. Read `assets/spec.txt` for authoritative CommonMark v0.31.2 rules
 
 **To add a feature:**
 1. Add `Node` variant to `src/ast.rs` (e.g., `Emphasis(Vec<Node>)`)
-2. Implement parsing in `src/parser.rs` (use `is_*` predicates, `parse_*` methods returning `(Node, usize)`)
+2. Implement parsing in `src/parser.rs`:
+   - Add `is_*` predicate method (returns bool or Option)
+   - Add `parse_*` method returning `(Node, usize)` where usize = lines consumed
+   - Insert check in main `parse()` loop **in correct order** (see "Critical: Parser Order")
 3. Add rendering in `src/renderer.rs` (pattern match on new node variant)
-4. Verify: `cargo test -- --nocapture` shows increased pass rate
+4. Verify: `cargo test -- --nocapture` shows increased pass count
 5. CI checks: `cargo fmt --check && cargo clippy && cargo doc`
 
-**Test distribution (prioritize high-impact areas):**
-- Emphasis and strong emphasis: 132 tests (20% of suite)
-- Links: 90 tests (14%)
-- List items: 48 tests (7%)
-- HTML blocks: 46 tests (7%)
-- Link reference definitions: 27 tests (4%)
+## Project Architecture
 
-**Quick wins for boosting coverage:**
-- Refine emphasis delimiter algorithm (132 tests in this section alone)
-- Complete link edge cases and reference-style links (90 tests)
-- Implement nested lists with proper indentation (48 list item tests)
+**Three-file core** (`src/ast.rs`, `src/parser.rs`, `src/renderer.rs`):
+- `ast.rs`: 18 `Node` enum variants with serde derives - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Inline nodes (Text, Code, Emphasis, Strong, Link, Image, etc.)
+- `parser.rs`: 2,970 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
+- `renderer.rs`: Recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
 
-## Project Overview
+**Public API** (`src/lib.rs`): Single function `markdown_to_html(&str) -> String`
 
-Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) written in Rust. The project aims to provide:
-- Fast, memory-safe parsing with a stable AST
-- Streaming APIs for efficient processing
-- Pluggable backends (HTML/Plaintext initially)
-- Optional GFM (GitHub Flavored Markdown) extensions
-- Full CommonMark spec-test coverage (655 tests from v0.31.2)
+**Test Infrastructure** (`tests/spec_tests.rs`):
+- Loads 655 JSON test cases from `tests/data/tests.json` (CommonMark v0.31.2)
+- Non-failing test - tracks progress, prints first 5 failures with diffs
+- Each test: `{markdown, html, example, start_line, end_line, section}`
+- Run with `--nocapture` to see detailed output
 
-**Current Status**: Test harness complete (**63.1% coverage** - 413/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, HTML blocks with 7 different types, lists with multi-line items and tight/loose detection, paragraphs, inline parsing with emphasis/strong/code spans/inline links/images/autolinks/entities/escapes/raw HTML), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST with reference definition support. Implementation proceeding **incrementally via TDD**.
-
-## Architecture & Design Goals
-
-### Core Components (Implementation Status)
-1. **Parser** (`src/parser.rs`): Line-by-line parser with implemented features:
-   - ✅ ATX headings (1-6 `#` levels with space requirement)
-   - ✅ Setext headings (`===` for h1, `---` for h2, with ≤3 spaces indent)
-   - ✅ Thematic breaks (`---`, `___`, `***` with proper spacing rules)
-   - ✅ Fenced code blocks (``` or ~~~ with 3+ chars, info strings, proper closing)
-   - ✅ Indented code blocks (4+ space indentation, blank line handling)
-   - ✅ Block quotes (`>` prefix, recursive parsing)
-   - ✅ Lists (unordered `-`, `+`, `*` and ordered `1.`, `2)` markers)
-   - ✅ Multi-line list items (with continuation and block elements)
-   - ✅ Tight vs loose list detection (blank lines between items)
-   - ✅ Paragraphs (multi-line support with proper lazy continuation)
-   - ✅ Inline parsing:
-     - Emphasis `*`/`_` and strong `**`/`__` (simplified algorithm)
-     - Code spans with backticks
-     - Inline links `[text](url "title")` and images `![alt](url "title")`
-     - Reference-style links `[text][ref]` and images `![alt][ref]`
-     - Autolinks `<http://url>` and `<email@example.com>`
-     - HTML entities (`&nbsp;`, `&copy;`) and numeric character refs (`&#35;`, `&#x1F;`)
-     - Backslash escapes for ASCII punctuation
-     - Hard line breaks (backslash at end of line)
-     - Raw HTML inline (comments, processing instructions, declarations, CDATA, tags)
-   - ✅ Link reference definitions `[label]: url "title"` (stored in `HashMap`)
-   - ✅ HTML blocks (7 different types with distinct start/end conditions)
-   - ⏳ Advanced features needed:
-     - Nested lists (proper indentation tracking)
-     - Full delimiter run algorithm for emphasis
-2. **AST** (`src/ast.rs`): `Node` enum with 18 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span), `Emphasis`, `Strong`, `Link`, `Image`, `HardBreak`, `HtmlBlock`, `HtmlInline`. Expand incrementally as features are added.
-3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children. **Special handling for `ListItem`**: detects nested block elements (checks for `</p>`, `</blockquote>`, etc.) and adjusts formatting accordingly.
-4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
-5. **Parser State** (`src/parser.rs`): Uses `HashMap<String, (String, Option<String>)>` to store link reference definitions with normalized labels (case-insensitive, whitespace-collapsed).
-6. **Streaming API**: Not yet implemented.
-
-### Test Infrastructure (Fully Operational)
-- **`tests/spec_tests.rs`**: Loads 655 CommonMark v0.31.2 examples from `tests/data/tests.json` (26 sections total)
-- Reports pass/fail stats with detailed first 5 failures
-- Currently non-failing test (tracking only) - will enforce once implementation is complete
-- Test format: `{ markdown, html, example, start_line, end_line, section }`
-- Run with `cargo test -- --nocapture` to see detailed failure output with diffs
+**Critical: Parser Order** (`src/parser.rs` main loop):
+The order of checks in `parse()` prevents false positives:
+1. Link reference definitions (silent, don't produce blocks)
+2. ATX headings (before thematic breaks - `###` could be either)
+3. Thematic breaks (before lists)
+4. Blockquotes
+5. HTML blocks (7 types, before lists since tags can look like markers)
+6. Lists (before code blocks)
+7. Fenced code blocks (MUST precede indented - can have 0-3 space indent)
+8. Indented code blocks (4+ spaces)
+9. Blank lines (skip)
+10. Setext headings (requires lookahead to next line for underline)
+11. Paragraphs (fallback, continues until interrupted)
 
 ## Development Workflow
 
-### Building & Testing
+**Building & Testing:**
 ```bash
-# Build project (Rust 2024 edition)
-cargo build --verbose
-
-# Run all tests including 655 spec tests (currently 413 passing, 63.1% coverage)
-cargo test --verbose
-
-# See detailed test output with pass/fail stats
-cargo test -- --nocapture
-
-# Format check (required for CI)
-cargo fmt --all -- --check
-
-# Clippy (zero warnings policy)
-cargo clippy --all-targets --all-features -- -D warnings
-
-# Generate docs
-cargo doc --no-deps --verbose
+cargo build --verbose                    # Rust 2024 edition
+cargo test --verbose                     # Run all 655 spec tests
+cargo test -- --nocapture                # See detailed output with first 5 failures
+cargo fmt --all -- --check               # Format check (required for CI)
+cargo clippy --all-targets --all-features -- -D warnings  # Linting (zero warnings)
+cargo doc --no-deps --verbose            # Generate docs
 ```
 
-### CI Pipeline (`.github/workflows/ci.yml`)
-- Runs on push and pull requests
-- Tests across **stable, beta, and nightly** Rust toolchains
-- Enforces: builds, tests, formatting, clippy, and docs
-- Uploads documentation artifacts for each toolchain
-- All checks must pass before merge
+**Test exploration (requires `jq`):**
+```bash
+# List all 26 sections
+jq -r '.[].section' tests/data/tests.json | sort -u
 
-### TDD Workflow (Critical)
-1. **Find relevant tests**: Search `tests/data/tests.json` by section (e.g., "Tabs", "Headings", "Lists")
-   ```bash
-   # List all sections (26 total)
-   jq -r '.[].section' tests/data/tests.json | sort -u
-   
-   # Get all tests for a section
-   jq '.[] | select(.section == "ATX headings")' tests/data/tests.json
-   
-   # Count tests per section (prioritize high-impact areas)
-   jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn
-   # Top sections: Emphasis (132), Links (90), List items (48)
-   
-   # Find failing test by example number
-   jq '.[] | select(.example == 123)' tests/data/tests.json
-   ```
-2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
-3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 63.1%)
-5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
+# Get tests for specific section
+jq '.[] | select(.section == "ATX headings")' tests/data/tests.json
 
-### Dependencies
-- **serde** (with derive): For AST serialization (`#[derive(Serialize, Deserialize)]` on `Node`)
-- **serde_json**: Parse `tests/data/tests.json`
-- **test-fuzz** (dev): For property-based fuzzing tests (not yet used)
-- Edition: Rust 2024
+# Count tests by section (find high-impact areas)
+jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn
+# Top sections: Emphasis (132), Links (90), List items (48)
+
+# Find specific test by example number
+jq '.[] | select(.example == 123)' tests/data/tests.json
+```
+
+**CI Pipeline** (`.github/workflows/ci.yml`):
+- Tests on stable, beta, nightly Rust toolchains
+- Enforces: build, test, fmt, clippy (zero warnings), docs
+- Uploads doc artifacts for each toolchain
 
 ## Coding Conventions
 
-### Rust Edition 2024
-Use latest stable features. Minimum Rust version: 1.85+. Check for edition-related breaking changes.
+**Rust Edition 2024:** Minimum Rust 1.85+. Latest stable features.
 
-### Testing Strategy
-1. **Spec compliance first**: Every parser/renderer feature must pass corresponding CommonMark tests
-2. **Non-failing tests**: `tests/spec_tests.rs` currently tracks progress but doesn't block CI. This is intentional during incremental development - tests report pass/fail statistics for visibility. Will become strict enforcement once core features are complete.
-3. **Incremental validation**: After each feature, run `cargo test -- --nocapture` to see new passing tests
-4. **Reference test structure** (`tests/data/tests.json`):
-   ```json
-   {
-     "markdown": "\tfoo\tbaz\t\tbim\n",
-     "html": "<pre><code>foo\tbaz\t\tbim\n</code></pre>\n",
-     "example": 1,
-     "start_line": 355,
-     "end_line": 360,
-     "section": "Tabs"
-   }
-   ```
-5. **Test output format**: First 5 failures show detailed diffs (input, expected, actual), then summary statistics with example numbers
+**Testing Strategy:**
+1. **Spec compliance first** - every feature must pass CommonMark tests
+2. **Non-failing tests** - `tests/spec_tests.rs` tracks progress, doesn't block CI (intentional during development)
+3. **Test format:** `{markdown, html, example, start_line, end_line, section}`
+4. **Output:** First 5 failures show detailed diffs, then summary with coverage %
 
-### Current Implementation Patterns
+**Current Implementation Patterns:**
 
 1. **AST Nodes** (`src/ast.rs`): Enum variants with serde derives
    ```rust
@@ -260,34 +191,30 @@ Use latest stable features. Minimum Rust version: 1.85+. Check for edition-relat
    - Currently implements flat lists only (single-line items)
    - Future: multi-line items, nesting, tight/loose detection
 
-### CommonMark Parsing Strategy (from spec)
-**Two-phase parsing** is mandatory:
-1. **Block parsing**: Consume lines, build document structure
-2. **Inline parsing**: Parse raw text in blocks into inline elements
-
-**Critical parsing rules**:
+**CommonMark Parsing Strategy** (from spec):
+- **Two-phase parsing** is mandatory: (1) Block parsing, (2) Inline parsing
 - Tabs expand to spaces (multiples of 4)
 - Indented code blocks: 4+ spaces
-- Fenced code blocks: \`\`\` or ~~~ with matching fence
+- Fenced code blocks: ``` or ~~~ with matching fence
 - List items track indentation for nesting
 - HTML blocks follow 7 different start conditions
 - Emphasis uses delimiter run algorithm
 
-### Error Handling
+**Error Handling:**
 - Parser should never panic on invalid input
 - Follow CommonMark philosophy: **no syntax errors**, only different interpretations
 - Unexpected input should produce valid output (often literal text)
 
-## File Organization (Current & Planned)
+## File Organization
 
-**Current structure**:
+**Current structure** (keep files in `src/` root until refactoring is needed):
 ```
 src/
   lib.rs           # Public API: markdown_to_html()
-  ast.rs           # Node enum (16 variants currently)
-  parser.rs        # Parser struct (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, paragraphs, basic inline parsing with links)
+  ast.rs           # Node enum (18 variants)
+  parser.rs        # Parser struct (2,970 lines)
   renderer.rs      # HtmlRenderer with escape_html()
-  main.rs          # Binary entry point (if needed)
+  main.rs          # Binary entry point
 
 tests/
   spec_tests.rs    # CommonMark v0.31.2 test runner
@@ -317,26 +244,11 @@ src/
     strikethrough.rs
 ```
 
-**Note**: Keep all files in `src/` root until code organization becomes necessary. Don't create subdirectories prematurely.
-
 ## Key Implementation Notes
 
-### Critical Parsing Details (Currently Implemented)
+**Critical Parsing Details (Currently Implemented):**
 
-1. **Parser Ordering Matters**: The `parse()` method checks block types in a specific order to avoid false positives. This order is critical:
-   ```rust
-   // Order in Parser::parse() main loop:
-   1. ATX headings (before thematic breaks, since ### could be heading or break)
-   2. Thematic breaks (before lists/paragraphs)
-   3. Blockquote start
-   4. List start (before code blocks)
-   5. Fenced code blocks (MUST come before indented code)
-   6. Indented code blocks
-   7. Blank lines (skip)
-   8. Setext headings (requires lookahead to next line)
-   9. Paragraphs (fallback)
-   ```
-   **Why this matters**: Fenced code blocks can have up to 3 spaces indentation, so they must be checked before indented code blocks (which require 4+ spaces). ATX headings like `### foo` must be checked before thematic breaks to avoid misinterpretation.
+1. **Parser Ordering Matters**: The `parse()` method checks block types in a specific order to avoid false positives (see "Critical: Parser Order" section above).
 
 2. **Fence Detection**: Backticks or tildes, 3+ characters, max 3 spaces indentation
    ```rust
@@ -346,17 +258,17 @@ src/
    }
    ```
 
-2. **Closing Fence Requirements**: Same character, >= opening length, only whitespace after
+3. **Closing Fence Requirements**: Same character, >= opening length, only whitespace after
    ```rust
    fn is_closing_fence(&self, line: &str, fence_char: char, min_fence_len: usize) -> bool
    ```
 
-3. **Thematic Break Rules**: 3+ matching `-`, `_`, or `*` with optional spaces between
+4. **Thematic Break Rules**: 3+ matching `-`, `_`, or `*` with optional spaces between
    - Must have 0-3 leading spaces (4+ = code block)
    - Can have spaces between characters
    - All non-space chars must match
 
-4. **Setext Heading Detection**: Two-line pattern with content + underline
+5. **Setext Heading Detection**: Two-line pattern with content + underline
    ```rust
    fn parse_setext_heading(&self, lines: &[&str]) -> Option<(u8, usize)> {
        // First line: ≤3 spaces indent, would be paragraph otherwise
@@ -364,12 +276,8 @@ src/
        // Returns (level, lines_consumed)
    }
    ```
-   - Underline must be all `=` (level 1) or all `-` (level 2)
-   - Trailing spaces allowed on underline
-   - Cannot have spaces between underline characters
-   - Most tests require inline parsing for full compatibility
 
-5. **Link Parsing Pattern** (`src/parser.rs`): Inline link syntax `[text](dest "title")`
+6. **Link Parsing Pattern**: Inline link syntax with destination and optional title
    ```rust
    fn try_parse_link(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
        // 1. Find closing ']' for link text (track bracket depth)
@@ -380,38 +288,24 @@ src/
        // Returns (Node::Link{destination, title, children}, position)
    }
    ```
-   - Link text can contain nested brackets (track depth)
-   - Destination can be angle-bracket enclosed `<...>` or raw
-   - Raw destinations allow balanced parens but no spaces
-   - Title is optional, can use `"`, `'`, or `()` delimiters
-   - Backslash escapes work in all parts
 
-### Future Features (Not Yet Implemented)
+**Future Features (Not Yet Implemented):**
+- Nested lists with proper indentation tracking
+- Full emphasis delimiter run algorithm per spec
+- Streaming API for large documents
+- Performance optimizations (avoid backtracking, benchmarks)
 
-- **Nested Lists**: Proper indentation tracking for multi-level list nesting
-- **Full Emphasis Algorithm**: Complete delimiter run algorithm per spec (currently simplified)
-- **Streaming API**: For large documents
-- **Performance**: Avoid backtracking, lazy evaluation, benchmark vs cmark/pulldown-cmark
+## Common Pitfalls & Troubleshooting
 
-## Common Pitfalls
-
-1. **Tab handling**: Tabs expand to next multiple of 4 (not fixed 4 spaces)
-2. **List item continuation**: Must maintain indentation relative to list marker
-3. **HTML block types**: 7 distinct start conditions, different end conditions
-4. **Link reference matching**: Case-insensitive, normalize whitespace
-5. **Emphasis precedence**: Code spans and HTML tags take precedence over emphasis
-
-## Troubleshooting
-
-### Common Test Failure Patterns (Current Implementation Gaps)
+**Common Test Failure Patterns:**
 The majority of current failures (242/655 tests) fall into these categories:
 1. **Emphasis and strong emphasis**: Full delimiter run algorithm needed (132 tests in section)
-2. **Link edge cases**: Complex link scenarios, reference definitions, and URL encoding (90 tests)
+2. **Link edge cases**: Complex link scenarios, reference definitions, URL encoding (90 tests)
 3. **List items**: Nested lists with proper indentation tracking (48 tests)
-4. **Tab handling in nested contexts**: Tabs within blockquotes, lists, and code blocks
+4. **Tab handling in nested contexts**: Tabs within blockquotes, lists, code blocks
 5. **HTML blocks edge cases**: While 7 types are implemented, some edge cases remain (46 tests total)
 
-### Tests failing after changes
+**When tests fail after changes:**
 ```bash
 # Run with output to see which tests are failing
 cargo test -- --nocapture
@@ -423,34 +317,33 @@ jq '.[] | select(.section == "ATX headings")' tests/data/tests.json | jq -s '.[0
 cargo fmt && cargo clippy --all-targets --all-features
 ```
 
-### Understanding test failures
+**Understanding test failures:**
 Test output shows:
 - Example number (cross-reference with `tests/data/tests.json`)
 - Section name (e.g., "Tabs", "Block quotes")
 - Input markdown, expected HTML, actual HTML
 - First 5 failures are detailed, then summary
 
-### Rust 2024 Edition Issues
+**Rust 2024 Edition Issues:**
 Edition 2024 is new (2024 stable release). If you encounter edition-related errors:
 - Check Rust version: `rustc --version` (should be 1.85+)
 - Update toolchain: `rustup update stable`
 - Reference: https://doc.rust-lang.org/edition-guide/rust-2024/
 
+**Common pitfalls:**
+1. **Tab handling**: Tabs expand to next multiple of 4 (not fixed 4 spaces)
+2. **List item continuation**: Must maintain indentation relative to list marker
+3. **HTML block types**: 7 distinct start conditions, different end conditions
+4. **Link reference matching**: Case-insensitive, normalize whitespace
+5. **Emphasis precedence**: Code spans and HTML tags take precedence over emphasis
+
 ## When Making Changes
 
 1. **Start with tests**: Find relevant examples in `tests/data/tests.json`
 2. **Reference the spec**: Check `assets/spec.txt` for authoritative rules
-3. **Run full test suite**: All 655 examples must pass
-4. **Add fuzz tests**: For new parsing logic
-5. **Update docs**: Keep API docs in sync with implementation
-6. **Check CI**: Ensure all toolchains pass
-
-## Resources
-
-- CommonMark Spec: https://spec.commonmark.org/0.31.2/
-- Reference Implementation: https://github.com/commonmark/cmark
-- Rust Markdown Parsers: pulldown-cmark, comrak (for comparison)
-- Test Suite: `tests/data/tests.json` (authoritative for this project)
+3. **Run full test suite**: All 655 examples must pass eventually
+4. **Update docs**: Keep API docs in sync with implementation
+5. **Check CI**: Ensure all toolchains pass (stable, beta, nightly)
 
 ## Concrete Example: Adding Blockquote Support
 
