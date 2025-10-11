@@ -1497,8 +1497,12 @@ impl Parser {
         }
 
         // Join lines with newlines and parse inline content
+        // Per CommonMark spec: remove initial and final spaces/tabs from paragraph content
         let text = paragraph_lines.join("\n");
-        let children = self.parse_inline(&text);
+        let trimmed_text = text
+            .trim_start_matches([' ', '\t'])
+            .trim_end_matches([' ', '\t']);
+        let children = self.parse_inline(trimmed_text);
 
         (Node::Paragraph(children), i)
     }
