@@ -1920,8 +1920,29 @@ impl Parser {
             i += 1;
         }
 
-        // Check if this is a left-flanking delimiter run
-        if !self.is_left_flanking(chars, start, count) {
+        let is_left_flanking = self.is_left_flanking(chars, start, count);
+        let is_right_flanking = self.is_right_flanking(chars, start, count);
+
+        // Check if this can open emphasis based on delimiter type
+        let can_open = if delimiter == '*' {
+            // Rule 1, 5: * can open emphasis/strong iff left-flanking
+            is_left_flanking
+        } else {
+            // Rule 2, 6: _ can open emphasis/strong iff left-flanking AND
+            // (not right-flanking OR (right-flanking AND preceded by punctuation))
+            if !is_left_flanking {
+                return None;
+            }
+            if !is_right_flanking {
+                true
+            } else {
+                // Both left and right flanking - must be preceded by punctuation
+                let before_char = if start == 0 { ' ' } else { chars[start - 1] };
+                self.is_unicode_punctuation(before_char)
+            }
+        };
+
+        if !can_open {
             return None;
         }
 
@@ -1946,50 +1967,118 @@ impl Parser {
         None
     }
 
+    /// Check if a character is Unicode punctuation (for emphasis flanking rules)
+    /// Per CommonMark spec: characters in Unicode P (punctuation) or S (symbol) categories
+    fn is_unicode_punctuation(&self, c: char) -> bool {
+        // Fast path for ASCII
+        if c.is_ascii_punctuation() {
+            return true;
+        }
+
+        // For non-ASCII, check if it's in the P or S categories
+        // This is a simplified check covering the most common ranges
+        // A full implementation would use Unicode database, but this covers
+        // the test cases including currency symbols ($, £, €, etc.)
+        let code = c as u32;
+
+        // Common punctuation and symbol ranges:
+        // - Latin-1 Supplement punctuation/symbols: 0x00A1-0x00BF
+        // - Currency symbols: 0x20A0-0x20CF and scattered (Sc category)
+        // - General Punctuation: 0x2000-0x206F
+        // - Math symbols: 0x2200-0x22FF
+        // - Arrows: 0x2190-0x21FF
+        // - Box drawing, etc.: 0x2500-0x25FF
+        // - Miscellaneous symbols: 0x2600-0x26FF
+        // - Supplemental Punctuation: 0x2E00-0x2E7F
+        matches!(code,
+            // Latin-1 Supplement (includes ¡-¿, ×, ÷, and ¢-¥ which are part of 0x00A1..=0x00BF)
+            0x00A1..=0x00BF | 0x00D7 | 0x00F7 |
+            // Currency symbols (including $)
+            0x0024 | 0x20A0..=0x20CF | 0x1E2FF |
+            // General Punctuation
+            0x2000..=0x206F |
+            // Supplemental Punctuation
+            0x2E00..=0x2E7F |
+            // Mathematical Operators
+            0x2200..=0x22FF |
+            // Arrows
+            0x2190..=0x21FF |
+            // Miscellaneous Technical
+            0x2300..=0x23FF |
+            // Box Drawing, Block Elements, Geometric Shapes
+            0x2500..=0x25FF |
+            // Miscellaneous Symbols
+            0x2600..=0x26FF |
+            // Dingbats
+            0x2700..=0x27BF |
+            // Miscellaneous Mathematical Symbols-A/B
+            0x27C0..=0x27EF | 0x2980..=0x29FF |
+            // Supplemental Arrows-A/B
+            0x27F0..=0x27FF | 0x2900..=0x297F |
+            // Miscellaneous Symbols and Arrows
+            0x2B00..=0x2BFF
+        )
+    }
+
     fn is_left_flanking(&self, chars: &[char], pos: usize, count: usize) -> bool {
         let after_pos = pos + count;
 
-        // Must not be followed by whitespace
-        if after_pos >= chars.len() {
-            return false;
-        }
+        // Beginning/end of line counts as Unicode whitespace
+        let after_char = if after_pos >= chars.len() {
+            ' ' // Treat end as whitespace
+        } else {
+            chars[after_pos]
+        };
 
-        let after_char = chars[after_pos];
+        let before_char = if pos == 0 {
+            ' ' // Treat beginning as whitespace
+        } else {
+            chars[pos - 1]
+        };
+
+        // Rule 1: not followed by Unicode whitespace
         if after_char.is_whitespace() {
             return false;
         }
 
-        // For underscore, must not be preceded by alphanumeric (intraword restriction)
-        if chars[pos] == '_' && pos > 0 {
-            let before_char = chars[pos - 1];
-            if before_char.is_alphanumeric() {
-                return false;
-            }
+        // Rule 2a: not followed by Unicode punctuation
+        if !self.is_unicode_punctuation(after_char) {
+            return true;
         }
 
-        true
+        // Rule 2b: followed by Unicode punctuation AND
+        // preceded by Unicode whitespace or Unicode punctuation
+        before_char.is_whitespace() || self.is_unicode_punctuation(before_char)
     }
 
     fn is_right_flanking(&self, chars: &[char], pos: usize, count: usize) -> bool {
-        // Must not be preceded by whitespace
-        if pos == 0 {
-            return false;
-        }
+        let after_pos = pos + count;
 
-        let before_char = chars[pos - 1];
+        let after_char = if after_pos >= chars.len() {
+            ' ' // Treat end as whitespace
+        } else {
+            chars[after_pos]
+        };
+
+        let before_char = if pos == 0 {
+            ' ' // Treat beginning as whitespace
+        } else {
+            chars[pos - 1]
+        };
+
+        // Rule 1: not preceded by Unicode whitespace
         if before_char.is_whitespace() {
             return false;
         }
 
-        // For underscore, must not be followed by alphanumeric (intraword restriction)
-        if pos + count < chars.len() && chars[pos] == '_' {
-            let after_char = chars[pos + count];
-            if after_char.is_alphanumeric() {
-                return false;
-            }
+        // Rule 2a: not preceded by Unicode punctuation
+        if !self.is_unicode_punctuation(before_char) {
+            return true;
         }
 
-        true
+        // Rule 2b: preceded by Unicode punctuation AND
+        // followed by Unicode whitespace or Unicode punctuation
+        after_char.is_whitespace() || self.is_unicode_punctuation(after_char)
     }
 
     fn find_emphasis_close(
@@ -2011,8 +2100,37 @@ impl Parser {
                     i += 1;
                 }
 
-                // Check if this is a valid right-flanking delimiter run
-                if count >= needed_count && self.is_right_flanking(chars, delim_start, count) {
+                if count < needed_count {
+                    continue;
+                }
+
+                let is_right_flanking = self.is_right_flanking(chars, delim_start, count);
+                let is_left_flanking = self.is_left_flanking(chars, delim_start, count);
+
+                // Check if this can close emphasis based on delimiter type
+                let can_close = if delimiter == '*' {
+                    // Rule 3, 7: * can close emphasis/strong iff right-flanking
+                    is_right_flanking
+                } else {
+                    // Rule 4, 8: _ can close emphasis/strong iff right-flanking AND
+                    // (not left-flanking OR (left-flanking AND followed by punctuation))
+                    if !is_right_flanking {
+                        false
+                    } else if !is_left_flanking {
+                        true
+                    } else {
+                        // Both left and right flanking - must be followed by punctuation
+                        let after_pos = delim_start + count;
+                        let after_char = if after_pos >= chars.len() {
+                            ' '
+                        } else {
+                            chars[after_pos]
+                        };
+                        self.is_unicode_punctuation(after_char)
+                    }
+                };
+
+                if can_close {
                     // Return content end position and position after delimiters
                     return Some((delim_start, delim_start + needed_count));
                 }
