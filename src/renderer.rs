@@ -125,6 +125,7 @@ fn render_node(node: &Node) -> String {
         }
         Node::HardBreak => "<br />\n".to_string(),
         Node::HtmlBlock(content) => content.clone(), // Pass through raw HTML unchanged
+        Node::HtmlInline(content) => content.clone(), // Pass through raw HTML unchanged
     }
 }
 

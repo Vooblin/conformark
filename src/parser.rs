@@ -1367,6 +1367,15 @@ impl Parser {
                 continue;
             }
 
+            // Try to parse raw HTML inline (after autolink attempt)
+            if chars[i] == '<'
+                && let Some((html_node, new_i)) = self.try_parse_html_inline(&chars, i)
+            {
+                nodes.push(html_node);
+                i = new_i;
+                continue;
+            }
+
             // Try to parse image (before link, since images start with ![)
             if chars[i] == '!'
                 && i + 1 < chars.len()
@@ -2662,5 +2671,299 @@ impl Parser {
 
         // No closing delimiter found
         None
+    }
+
+    /// Try to parse raw HTML inline
+    /// Returns (Node::HtmlInline, position_after) if successful
+    fn try_parse_html_inline(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
+        if start >= chars.len() || chars[start] != '<' {
+            return None;
+        }
+
+        let mut i = start + 1;
+
+        // Type 1: HTML comment <!--...-->
+        if i + 2 < chars.len() && chars[i] == '!' && chars[i + 1] == '-' && chars[i + 2] == '-' {
+            i += 3;
+            // Look for closing -->
+            // Cannot contain -->, cannot start with > or ->, cannot end with -
+            let comment_start = i;
+
+            // Check for invalid starts
+            if i < chars.len() && chars[i] == '>' {
+                return None; // <!--> is invalid
+            }
+            if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
+                return None; // <!--> is invalid
+            }
+
+            while i < chars.len() {
+                if chars[i] == '-'
+                    && i + 2 < chars.len()
+                    && chars[i + 1] == '-'
+                    && chars[i + 2] == '>'
+                {
+                    // Found closing -->
+                    // Check that it doesn't end with - before --
+                    if i > comment_start && chars[i - 1] == '-' {
+                        return None; // Cannot end with ---
+                    }
+                    i += 3;
+                    let html: String = chars[start..i].iter().collect();
+                    return Some((Node::HtmlInline(html), i));
+                }
+                // Cannot have newline in inline HTML
+                if chars[i] == '\n' {
+                    return None;
+                }
+                i += 1;
+            }
+            return None; // No closing -->
+        }
+
+        // Type 2: Processing instruction <?...?>
+        if i < chars.len() && chars[i] == '?' {
+            i += 1;
+            while i < chars.len() {
+                if chars[i] == '?' && i + 1 < chars.len() && chars[i + 1] == '>' {
+                    i += 2;
+                    let html: String = chars[start..i].iter().collect();
+                    return Some((Node::HtmlInline(html), i));
+                }
+                if chars[i] == '\n' {
+                    return None;
+                }
+                i += 1;
+            }
+            return None;
+        }
+
+        // Type 3: Declaration <!LETTER...>
+        if i < chars.len() && chars[i] == '!' {
+            if i + 1 < chars.len() && chars[i + 1].is_ascii_uppercase() {
+                i += 1;
+                while i < chars.len() {
+                    if chars[i] == '>' {
+                        i += 1;
+                        let html: String = chars[start..i].iter().collect();
+                        return Some((Node::HtmlInline(html), i));
+                    }
+                    if chars[i] == '\n' {
+                        return None;
+                    }
+                    i += 1;
+                }
+            }
+            return None;
+        }
+
+        // Type 4: CDATA section <![CDATA[...]]>
+        if i + 7 < chars.len()
+            && chars[i] == '!'
+            && chars[i + 1] == '['
+            && chars[i + 2] == 'C'
+            && chars[i + 3] == 'D'
+            && chars[i + 4] == 'A'
+            && chars[i + 5] == 'T'
+            && chars[i + 6] == 'A'
+            && chars[i + 7] == '['
+        {
+            i += 8;
+            while i < chars.len() {
+                if i + 2 < chars.len()
+                    && chars[i] == ']'
+                    && chars[i + 1] == ']'
+                    && chars[i + 2] == '>'
+                {
+                    i += 3;
+                    let html: String = chars[start..i].iter().collect();
+                    return Some((Node::HtmlInline(html), i));
+                }
+                if chars[i] == '\n' {
+                    return None;
+                }
+                i += 1;
+            }
+            return None;
+        }
+
+        // Type 5: Closing tag </tagname>
+        if i < chars.len() && chars[i] == '/' {
+            i += 1;
+            // Tag name must start with ASCII letter
+            if i >= chars.len() || !chars[i].is_ascii_alphabetic() {
+                return None;
+            }
+            i += 1;
+            // Consume rest of tag name (letters, digits, hyphens)
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '-') {
+                i += 1;
+            }
+            // Skip whitespace
+            while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t') {
+                i += 1;
+            }
+            // Must end with >
+            if i < chars.len() && chars[i] == '>' {
+                i += 1;
+                let html: String = chars[start..i].iter().collect();
+                return Some((Node::HtmlInline(html), i));
+            }
+            return None;
+        }
+
+        // Type 6: Open tag <tagname attributes...> or <tagname attributes.../>
+        // Tag name must start with ASCII letter
+        if i >= chars.len() || !chars[i].is_ascii_alphabetic() {
+            return None;
+        }
+        i += 1;
+
+        // Consume tag name (letters, digits, hyphens)
+        while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '-') {
+            i += 1;
+        }
+
+        // Now parse attributes
+        loop {
+            // Skip whitespace (spaces, tabs, and up to one newline)
+            let mut newline_seen = false;
+            while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t' || chars[i] == '\n') {
+                if chars[i] == '\n' {
+                    if newline_seen {
+                        return None; // Can't have multiple newlines
+                    }
+                    newline_seen = true;
+                }
+                i += 1;
+            }
+
+            // Check for end of tag
+            if i >= chars.len() {
+                return None;
+            }
+
+            if chars[i] == '>' {
+                i += 1;
+                let html: String = chars[start..i].iter().collect();
+                return Some((Node::HtmlInline(html), i));
+            }
+
+            if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '>' {
+                i += 2;
+                let html: String = chars[start..i].iter().collect();
+                return Some((Node::HtmlInline(html), i));
+            }
+
+            // Try to parse attribute name
+            if !(chars[i].is_ascii_alphabetic() || chars[i] == '_' || chars[i] == ':') {
+                return None; // Invalid attribute name start
+            }
+            i += 1;
+
+            // Rest of attribute name
+            while i < chars.len()
+                && (chars[i].is_ascii_alphanumeric()
+                    || chars[i] == '_'
+                    || chars[i] == '.'
+                    || chars[i] == ':'
+                    || chars[i] == '-')
+            {
+                i += 1;
+            }
+
+            // Skip whitespace before =
+            newline_seen = false;
+            while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t' || chars[i] == '\n') {
+                if chars[i] == '\n' {
+                    if newline_seen {
+                        return None;
+                    }
+                    newline_seen = true;
+                }
+                i += 1;
+            }
+
+            // Check for attribute value
+            if i < chars.len() && chars[i] == '=' {
+                i += 1;
+
+                // Skip whitespace after =
+                newline_seen = false;
+                while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t' || chars[i] == '\n') {
+                    if chars[i] == '\n' {
+                        if newline_seen {
+                            return None;
+                        }
+                        newline_seen = true;
+                    }
+                    i += 1;
+                }
+
+                if i >= chars.len() {
+                    return None;
+                }
+
+                // Parse attribute value
+                if chars[i] == '"' {
+                    // Double-quoted value
+                    i += 1;
+                    while i < chars.len() && chars[i] != '"' {
+                        if chars[i] == '\n' {
+                            return None; // No newlines in quoted values
+                        }
+                        i += 1;
+                    }
+                    if i >= chars.len() {
+                        return None; // No closing quote
+                    }
+                    i += 1; // Skip closing "
+                } else if chars[i] == '\'' {
+                    // Single-quoted value
+                    i += 1;
+                    while i < chars.len() && chars[i] != '\'' {
+                        if chars[i] == '\n' {
+                            return None; // No newlines in quoted values
+                        }
+                        i += 1;
+                    }
+                    if i >= chars.len() {
+                        return None; // No closing quote
+                    }
+                    i += 1; // Skip closing '
+                } else {
+                    // Unquoted value - no spaces, tabs, newlines, ", ', =, <, >, `
+                    if chars[i] == ' '
+                        || chars[i] == '\t'
+                        || chars[i] == '\n'
+                        || chars[i] == '"'
+                        || chars[i] == '\''
+                        || chars[i] == '='
+                        || chars[i] == '<'
+                        || chars[i] == '>'
+                        || chars[i] == '`'
+                    {
+                        return None;
+                    }
+                    i += 1;
+                    while i < chars.len() {
+                        if chars[i] == ' '
+                            || chars[i] == '\t'
+                            || chars[i] == '\n'
+                            || chars[i] == '"'
+                            || chars[i] == '\''
+                            || chars[i] == '='
+                            || chars[i] == '<'
+                            || chars[i] == '>'
+                            || chars[i] == '`'
+                        {
+                            break;
+                        }
+                        i += 1;
+                    }
+                }
+            }
+            // Attribute without value is OK, continue to next attribute or tag end
+        }
     }
 }
