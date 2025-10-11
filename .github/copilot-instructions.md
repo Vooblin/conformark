@@ -4,9 +4,9 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,251 lines - order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,257 lines - order matters!).
 
-**Current status**: 69.3% coverage (454/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, tab handling in lists.
+**Current status**: 70.8% coverage (464/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, tab handling in lists.
 
 ## Quick Start for AI Agents
 
@@ -304,7 +304,7 @@ src/
 ## Common Pitfalls & Troubleshooting
 
 **Common Test Failure Patterns:**
-The majority of current failures (201/655 tests) fall into these categories:
+The majority of current failures (191/655 tests) fall into these categories:
 1. **Emphasis and strong emphasis**: Full delimiter run algorithm needed (132 tests in section)
 2. **Link edge cases**: Complex link scenarios, reference definitions, URL encoding (90 tests)
 3. **List items**: Nested lists with proper indentation tracking (48 tests)
