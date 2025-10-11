@@ -966,26 +966,30 @@ impl Parser {
         // Get the content after indentation
         let content = &line[indent..];
 
-        // Find first non-whitespace character
-        let first_char = content.trim_start().chars().next()?;
+        // Trim trailing whitespace to get the actual underline part
+        let trimmed = content.trim_end();
 
-        // Must be '=' or '-'
+        // Must have at least one character
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        // Find first character (which must be = or -)
+        let first_char = trimmed.chars().next()?;
+
+        // Determine level
         let level = match first_char {
             '=' => 1,
             '-' => 2,
             _ => return None,
         };
 
-        // All non-whitespace characters must be the same (= or -)
-        for ch in content.chars() {
-            if ch != ' ' && ch != '\t' && ch != first_char {
+        // ALL characters in the trimmed part must be the same (= or -)
+        // No spaces or other characters allowed in the middle
+        for ch in trimmed.chars() {
+            if ch != first_char {
                 return None;
             }
-        }
-
-        // Must have at least one underline character (not just whitespace)
-        if content.trim().is_empty() {
-            return None;
         }
 
         Some((level, 2)) // Consume 2 lines (content + underline)
