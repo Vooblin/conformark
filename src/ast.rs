@@ -39,5 +39,6 @@ pub enum Node {
         alt_text: Vec<Node>, // Alt text can contain inline elements
     },
     HardBreak, // <br /> tag (backslash at end of line)
+    HtmlBlock(String), // Raw HTML block (passed through unchanged)
                // More node types will be added incrementally
 }
