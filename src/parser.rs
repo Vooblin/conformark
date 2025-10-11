@@ -1,14 +1,20 @@
 /// CommonMark parser implementation
 use crate::ast::Node;
+use std::collections::HashMap;
 
-pub struct Parser;
+pub struct Parser {
+    /// Link reference definitions: label -> (destination, title)
+    reference_definitions: HashMap<String, (String, Option<String>)>,
+}
 
 impl Parser {
     pub fn new() -> Self {
-        Parser
+        Parser {
+            reference_definitions: HashMap::new(),
+        }
     }
 
-    pub fn parse(&self, input: &str) -> Node {
+    pub fn parse(&mut self, input: &str) -> Node {
         let mut blocks = Vec::new();
         let lines: Vec<&str> = input.lines().collect();
         let mut i = 0;
@@ -16,8 +22,12 @@ impl Parser {
         while i < lines.len() {
             let line = lines[i];
 
+            // Try to parse link reference definition first (doesn't produce output)
+            if let Some(lines_consumed) = self.try_parse_link_reference_definition(&lines[i..]) {
+                i += lines_consumed;
+            }
             // Try to parse ATX heading first
-            if let Some(heading) = self.parse_atx_heading(line) {
+            else if let Some(heading) = self.parse_atx_heading(line) {
                 blocks.push(heading);
                 i += 1;
             }
@@ -395,7 +405,7 @@ impl Parser {
     }
 
     /// Parse a blockquote starting from the current position
-    fn parse_blockquote(&self, lines: &[&str]) -> (Node, usize) {
+    fn parse_blockquote(&mut self, lines: &[&str]) -> (Node, usize) {
         let mut quote_lines = Vec::new();
         let mut i = 0;
 
@@ -660,7 +670,7 @@ impl Parser {
     }
 
     /// Parse a list (collecting consecutive items with same marker type)
-    fn parse_list(&self, lines: &[&str], list_type: ListType) -> (Node, usize) {
+    fn parse_list(&mut self, lines: &[&str], list_type: ListType) -> (Node, usize) {
         let mut items = Vec::new();
         let mut i = 0;
 
@@ -715,7 +725,7 @@ impl Parser {
     }
 
     /// Parse a single list item with multi-line support
-    fn parse_list_item(&self, lines: &[&str], list_type: &ListType) -> (Node, usize) {
+    fn parse_list_item(&mut self, lines: &[&str], list_type: &ListType) -> (Node, usize) {
         let first_line = lines[0];
 
         // Calculate the content indent (W + N)
@@ -1313,7 +1323,11 @@ impl Parser {
     }
 
     fn try_parse_link(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
-        // Link syntax: [link text](destination "title")
+        // Link syntax:
+        // - Inline: [link text](destination "title")
+        // - Full reference: [link text][label]
+        // - Collapsed reference: [link text][]
+        // - Shortcut reference: [link text]
         // We start at '['
         let mut i = start + 1;
 
@@ -1343,9 +1357,32 @@ impl Parser {
         let text_end = i;
         i += 1; // Move past ']'
 
+        // Parse the link text
+        let link_text: String = chars[text_start..text_end].iter().collect();
+
+        // Check what follows: '(' for inline, '[' for reference
+        if i < chars.len() && chars[i] == '(' {
+            // Inline link
+            self.try_parse_inline_link(chars, i, &link_text)
+        } else if i < chars.len() && chars[i] == '[' {
+            // Full or collapsed reference link
+            self.try_parse_reference_link(chars, i, &link_text)
+        } else {
+            // Try shortcut reference link
+            self.try_parse_shortcut_reference_link(&link_text, i)
+        }
+    }
+
+    fn try_parse_inline_link(
+        &self,
+        chars: &[char],
+        start: usize,
+        link_text: &str,
+    ) -> Option<(Node, usize)> {
+        let mut i = start;
         // Now we need '(' for inline link
         if i >= chars.len() || chars[i] != '(' {
-            return None; // Not an inline link
+            return None;
         }
         i += 1; // Move past '('
 
@@ -1441,9 +1478,7 @@ impl Parser {
         }
         i += 1; // Move past ')'
 
-        // Parse the link text
-        let link_text: String = chars[text_start..text_end].iter().collect();
-        let children = self.parse_inline(&link_text);
+        let children = self.parse_inline(link_text);
 
         Some((
             Node::Link {
@@ -1455,8 +1490,87 @@ impl Parser {
         ))
     }
 
+    fn try_parse_reference_link(
+        &self,
+        chars: &[char],
+        start: usize,
+        link_text: &str,
+    ) -> Option<(Node, usize)> {
+        let mut i = start;
+        // Must be '['
+        if i >= chars.len() || chars[i] != '[' {
+            return None;
+        }
+        i += 1; // Move past '['
+
+        // Find closing ']'
+        let label_start = i;
+        while i < chars.len() && chars[i] != ']' {
+            i += 1;
+        }
+
+        if i >= chars.len() {
+            return None; // No closing bracket
+        }
+
+        let raw_label: String = chars[label_start..i].iter().collect();
+        i += 1; // Move past ']'
+
+        // Determine the label to look up
+        let label = if raw_label.is_empty() {
+            // Collapsed reference: use link text as label
+            Self::normalize_label(link_text)
+        } else {
+            // Full reference: use explicit label
+            Self::normalize_label(&raw_label)
+        };
+
+        // Look up the reference definition
+        if let Some((destination, title)) = self.reference_definitions.get(&label) {
+            let children = self.parse_inline(link_text);
+            Some((
+                Node::Link {
+                    destination: destination.clone(),
+                    title: title.clone(),
+                    children,
+                },
+                i,
+            ))
+        } else {
+            // Reference not found
+            None
+        }
+    }
+
+    fn try_parse_shortcut_reference_link(
+        &self,
+        link_text: &str,
+        end_pos: usize,
+    ) -> Option<(Node, usize)> {
+        // Shortcut reference: [link text] where link_text is also the label
+        let label = Self::normalize_label(link_text);
+
+        // Look up the reference definition
+        if let Some((destination, title)) = self.reference_definitions.get(&label) {
+            let children = self.parse_inline(link_text);
+            Some((
+                Node::Link {
+                    destination: destination.clone(),
+                    title: title.clone(),
+                    children,
+                },
+                end_pos,
+            ))
+        } else {
+            // Reference not found
+            None
+        }
+    }
+
     fn try_parse_image(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
-        // Image syntax: ![alt text](destination "title")
+        // Image syntax:
+        // - Inline: ![alt text](destination "title")
+        // - Reference: ![alt text][label] or ![alt text][] or ![alt text]
         // We start at '!'
         if chars[start] != '!' || start + 1 >= chars.len() || chars[start + 1] != '[' {
             return None;
@@ -1490,9 +1604,32 @@ impl Parser {
         let text_end = i;
         i += 1; // Move past ']'
 
+        // Parse the alt text
+        let alt_text_str: String = chars[text_start..text_end].iter().collect();
+
+        // Check what follows: '(' for inline, '[' for reference
+        if i < chars.len() && chars[i] == '(' {
+            // Inline image
+            self.try_parse_inline_image(chars, i, &alt_text_str)
+        } else if i < chars.len() && chars[i] == '[' {
+            // Full or collapsed reference image
+            self.try_parse_reference_image(chars, i, &alt_text_str)
+        } else {
+            // Try shortcut reference image
+            self.try_parse_shortcut_reference_image(&alt_text_str, i)
+        }
+    }
+
+    fn try_parse_inline_image(
+        &self,
+        chars: &[char],
+        start: usize,
+        alt_text_str: &str,
+    ) -> Option<(Node, usize)> {
+        let mut i = start;
         // Now we need '(' for inline image
         if i >= chars.len() || chars[i] != '(' {
-            return None; // Not an inline image
+            return None;
         }
         i += 1; // Move past '('
 
@@ -1588,9 +1725,7 @@ impl Parser {
         }
         i += 1; // Move past ')'
 
-        // Parse the alt text (but flatten to plain text for alt attribute)
-        let alt_text_str: String = chars[text_start..text_end].iter().collect();
-        let alt_text = self.parse_inline(&alt_text_str);
+        let alt_text = self.parse_inline(alt_text_str);
 
         Some((
             Node::Image {
@@ -1600,6 +1735,83 @@ impl Parser {
             },
             i,
         ))
+    }
+
+    fn try_parse_reference_image(
+        &self,
+        chars: &[char],
+        start: usize,
+        alt_text_str: &str,
+    ) -> Option<(Node, usize)> {
+        let mut i = start;
+        // Must be '['
+        if i >= chars.len() || chars[i] != '[' {
+            return None;
+        }
+        i += 1; // Move past '['
+
+        // Find closing ']'
+        let label_start = i;
+        while i < chars.len() && chars[i] != ']' {
+            i += 1;
+        }
+
+        if i >= chars.len() {
+            return None; // No closing bracket
+        }
+
+        let raw_label: String = chars[label_start..i].iter().collect();
+        i += 1; // Move past ']'
+
+        // Determine the label to look up
+        let label = if raw_label.is_empty() {
+            // Collapsed reference: use alt text as label
+            Self::normalize_label(alt_text_str)
+        } else {
+            // Full reference: use explicit label
+            Self::normalize_label(&raw_label)
+        };
+
+        // Look up the reference definition
+        if let Some((destination, title)) = self.reference_definitions.get(&label) {
+            let alt_text = self.parse_inline(alt_text_str);
+            Some((
+                Node::Image {
+                    destination: destination.clone(),
+                    title: title.clone(),
+                    alt_text,
+                },
+                i,
+            ))
+        } else {
+            // Reference not found
+            None
+        }
+    }
+
+    fn try_parse_shortcut_reference_image(
+        &self,
+        alt_text_str: &str,
+        end_pos: usize,
+    ) -> Option<(Node, usize)> {
+        // Shortcut reference: ![alt text] where alt_text is also the label
+        let label = Self::normalize_label(alt_text_str);
+
+        // Look up the reference definition
+        if let Some((destination, title)) = self.reference_definitions.get(&label) {
+            let alt_text = self.parse_inline(alt_text_str);
+            Some((
+                Node::Image {
+                    destination: destination.clone(),
+                    title: title.clone(),
+                    alt_text,
+                },
+                end_pos,
+            ))
+        } else {
+            // Reference not found
+            None
+        }
     }
 
     fn try_parse_autolink(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
@@ -1888,5 +2100,238 @@ impl Parser {
     fn url_encode_autolink(&self, text: &str) -> String {
         // Percent-encode backslashes as %5C (spec says backslash-escapes don't work in autolinks)
         text.replace('\\', "%5C")
+    }
+
+    /// Try to parse a link reference definition
+    /// Returns Some(lines_consumed) if successful, None otherwise
+    fn try_parse_link_reference_definition(&mut self, lines: &[&str]) -> Option<usize> {
+        if lines.is_empty() {
+            return None;
+        }
+
+        let first_line = lines[0];
+
+        // Check for up to 3 spaces of indentation
+        let indent_cols = self.count_indent_columns(first_line);
+        if indent_cols > 3 {
+            return None;
+        }
+
+        let trimmed = first_line.trim_start();
+
+        // Must start with [
+        if !trimmed.starts_with('[') {
+            return None;
+        }
+
+        // Find the label (link text within brackets)
+        let label_end = trimmed.find(']')?;
+        if label_end == 1 {
+            // Empty label
+            return None;
+        }
+
+        let raw_label = &trimmed[1..label_end];
+        let label = Self::normalize_label(raw_label);
+
+        // After ], must have :
+        let after_label = &trimmed[label_end + 1..];
+        if !after_label.starts_with(':') {
+            return None;
+        }
+
+        let after_colon = after_label[1..].trim_start();
+
+        // Parse destination (can span multiple lines)
+        let mut current_line = 0;
+        let mut remaining = after_colon;
+
+        // If nothing after colon on first line, check next line
+        if remaining.is_empty() && current_line + 1 < lines.len() {
+            current_line += 1;
+            remaining = lines[current_line].trim_start();
+        }
+
+        // Parse destination
+        let (destination, chars_consumed) = self.parse_link_destination(remaining)?;
+        remaining = remaining[chars_consumed..].trim_start();
+
+        // Check if we need to continue to next line for title
+        if remaining.is_empty() && current_line + 1 < lines.len() {
+            current_line += 1;
+            remaining = lines[current_line].trim_start();
+        }
+
+        // Try to parse optional title
+        let title = if !remaining.is_empty() {
+            if let Some((title_text, title_consumed)) = self.parse_link_title(remaining) {
+                remaining = remaining[title_consumed..].trim();
+
+                // After title, rest of line must be empty
+                if !remaining.is_empty() {
+                    return None;
+                }
+
+                Some(title_text)
+            } else {
+                // Not a valid title, but that's ok - title is optional
+                // Rest of line must be empty though
+                if !remaining.is_empty() {
+                    return None;
+                }
+                None
+            }
+        } else {
+            None
+        };
+
+        // Successfully parsed - store the definition (first one wins)
+        self.reference_definitions
+            .entry(label)
+            .or_insert((destination, title));
+
+        Some(current_line + 1)
+    }
+
+    /// Normalize a label for matching (case-insensitive, collapse whitespace)
+    fn normalize_label(label: &str) -> String {
+        label
+            .chars()
+            .map(|c| c.to_lowercase().to_string())
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .join(" ")
+    }
+
+    /// Parse a link destination (for reference definitions)
+    /// Returns (destination, byte_offset) or None
+    fn parse_link_destination(&self, text: &str) -> Option<(String, usize)> {
+        if text.is_empty() {
+            return None;
+        }
+
+        let chars: Vec<char> = text.chars().collect();
+
+        // Angle-bracket form: <...>
+        if chars[0] == '<' {
+            let mut i = 1;
+            let mut dest = String::new();
+
+            while i < chars.len() {
+                match chars[i] {
+                    '>' => {
+                        // Calculate byte offset
+                        let byte_offset = chars[..=i].iter().map(|c| c.len_utf8()).sum();
+                        return Some((dest, byte_offset));
+                    }
+                    '\\' if i + 1 < chars.len() => {
+                        // Backslash escape
+                        dest.push(chars[i + 1]);
+                        i += 2;
+                    }
+                    '<' | '\n' | '\r' => {
+                        // Invalid characters in angle-bracket destination
+                        return None;
+                    }
+                    ch => {
+                        dest.push(ch);
+                        i += 1;
+                    }
+                }
+            }
+
+            // No closing >
+            return None;
+        }
+
+        // Non-angle-bracket form: any non-space chars, balanced parens
+        let mut i = 0;
+        let mut dest = String::new();
+        let mut paren_depth = 0;
+
+        while i < chars.len() {
+            match chars[i] {
+                ' ' | '\t' | '\n' | '\r' => {
+                    break;
+                }
+                '\\' if i + 1 < chars.len() => {
+                    // Backslash escape
+                    dest.push(chars[i + 1]);
+                    i += 2;
+                }
+                '(' => {
+                    paren_depth += 1;
+                    dest.push('(');
+                    i += 1;
+                }
+                ')' => {
+                    if paren_depth == 0 {
+                        break;
+                    }
+                    paren_depth -= 1;
+                    dest.push(')');
+                    i += 1;
+                }
+                ch if ch.is_ascii_control() => {
+                    return None;
+                }
+                ch => {
+                    dest.push(ch);
+                    i += 1;
+                }
+            }
+        }
+
+        if dest.is_empty() {
+            None
+        } else {
+            // Calculate byte offset
+            let byte_offset = chars[..i].iter().map(|c| c.len_utf8()).sum();
+            Some((dest, byte_offset))
+        }
+    }
+
+    /// Parse a link title (for reference definitions)
+    /// Returns (title, byte_offset) or None
+    fn parse_link_title(&self, text: &str) -> Option<(String, usize)> {
+        if text.is_empty() {
+            return None;
+        }
+
+        let chars: Vec<char> = text.chars().collect();
+        let delimiter = chars[0];
+
+        let closing_delimiter = match delimiter {
+            '"' => '"',
+            '\'' => '\'',
+            '(' => ')',
+            _ => return None,
+        };
+
+        let mut i = 1;
+        let mut title = String::new();
+
+        while i < chars.len() {
+            match chars[i] {
+                ch if ch == closing_delimiter => {
+                    // Calculate byte offset
+                    let byte_offset = chars[..=i].iter().map(|c| c.len_utf8()).sum();
+                    return Some((title, byte_offset));
+                }
+                '\\' if i + 1 < chars.len() => {
+                    // Backslash escape
+                    title.push(chars[i + 1]);
+                    i += 2;
+                }
+                ch => {
+                    title.push(ch);
+                    i += 1;
+                }
+            }
+        }
+
+        // No closing delimiter found
+        None
     }
 }
