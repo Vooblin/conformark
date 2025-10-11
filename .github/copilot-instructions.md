@@ -4,9 +4,9 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,262 lines - order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,268 lines - order matters!).
 
-**Current status**: 70.8% coverage (464/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, tab handling in lists.
+**Current status**: 71.5% coverage (468/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, tab handling in nested contexts.
 
 ## Quick Start for AI Agents
 
@@ -30,8 +30,8 @@
 
 **Three-file core** (`src/ast.rs`, `src/parser.rs`, `src/renderer.rs`):
 - `ast.rs`: 18 `Node` enum variants with serde derives - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `parser.rs`: 3,262 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
-- `renderer.rs`: Recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
+- `parser.rs`: 3,268 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
+- `renderer.rs`: 160 lines, recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
 
 **Public API** (`src/lib.rs`): Single function `markdown_to_html(&str) -> String`
 
@@ -211,16 +211,16 @@ jq '.[] | select(.example == 123)' tests/data/tests.json
 - Follow CommonMark philosophy: **no syntax errors**, only different interpretations
 - Unexpected input should produce valid output (often literal text)
 
-## File Organization
+**File Organization
 
 **Current structure** (keep files in `src/` root until refactoring is needed):
 ```
 src/
-  lib.rs           # Public API: markdown_to_html()
-  ast.rs           # Node enum (18 variants)
-  parser.rs        # Parser struct (3,262 lines)
-  renderer.rs      # HtmlRenderer with escape_html()
-  main.rs          # Binary entry point
+  lib.rs           # Public API: markdown_to_html() (64 lines)
+  ast.rs           # Node enum (18 variants, 45 lines)
+  parser.rs        # Parser struct (3,268 lines)
+  renderer.rs      # HtmlRenderer with escape_html() (160 lines)
+  main.rs          # Binary entry point (11 lines)
 
 tests/
   spec_tests.rs    # CommonMark v0.31.2 test runner
@@ -306,12 +306,12 @@ src/
 ## Common Pitfalls & Troubleshooting
 
 **Common Test Failure Patterns:**
-The majority of current failures (191/655 tests) fall into these categories:
+The majority of current failures (187/655 tests) fall into these categories:
 1. **Emphasis and strong emphasis**: Full delimiter run algorithm needed (132 tests in section)
 2. **Link edge cases**: Complex link scenarios, reference definitions, URL encoding (90 tests)
 3. **List items**: Nested lists with proper indentation tracking (48 tests)
-4. **Tab handling in nested contexts**: Tabs within blockquotes, lists, code blocks
-5. **HTML blocks edge cases**: While 7 types are implemented, some edge cases remain (46 tests total)
+4. **HTML blocks edge cases**: While 7 types are implemented, some edge cases remain (46 tests total)
+5. **Tab handling in nested contexts**: Tabs within blockquotes, lists, code blocks - partial tab expansion logic
 
 **When tests fail after changes:**
 ```bash

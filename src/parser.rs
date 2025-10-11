@@ -351,6 +351,13 @@ impl Parser {
     }
 
     fn parse_atx_heading(&self, line: &str) -> Option<Node> {
+        // ATX headings can have 0-3 spaces of indentation
+        // 4+ spaces = indented code block, not a heading
+        let leading_spaces = line.chars().take_while(|&c| c == ' ').count();
+        if leading_spaces >= 4 {
+            return None;
+        }
+
         let trimmed = line.trim_start();
 
         // Count leading # characters
