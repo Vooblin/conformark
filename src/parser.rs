@@ -15,14 +15,26 @@ impl Parser {
     }
 
     pub fn parse(&mut self, input: &str) -> Node {
-        let mut blocks = Vec::new();
         let lines: Vec<&str> = input.lines().collect();
+
+        // FIRST PASS: Collect all link reference definitions
+        let mut i = 0;
+        while i < lines.len() {
+            if let Some(lines_consumed) = self.try_parse_link_reference_definition(&lines[i..]) {
+                i += lines_consumed;
+            } else {
+                i += 1;
+            }
+        }
+
+        // SECOND PASS: Parse blocks (now with all references available)
+        let mut blocks = Vec::new();
         let mut i = 0;
 
         while i < lines.len() {
             let line = lines[i];
 
-            // Try to parse link reference definition first (doesn't produce output)
+            // Skip link reference definitions (already processed, won't modify state)
             if let Some(lines_consumed) = self.try_parse_link_reference_definition(&lines[i..]) {
                 i += lines_consumed;
             }
@@ -2704,8 +2716,8 @@ impl Parser {
 
         // Successfully parsed - store the definition (first one wins)
         self.reference_definitions
-            .entry(label)
-            .or_insert((destination, title));
+            .entry(label.clone())
+            .or_insert((destination.clone(), title.clone()));
 
         Some(current_line + 1)
     }
@@ -2742,8 +2754,8 @@ impl Parser {
                         let byte_offset = chars[..=i].iter().map(|c| c.len_utf8()).sum();
                         return Some((dest, byte_offset));
                     }
-                    '\\' if i + 1 < chars.len() => {
-                        // Backslash escape
+                    '\\' if i + 1 < chars.len() && self.is_ascii_punctuation(chars[i + 1]) => {
+                        // Backslash escape of ASCII punctuation
                         dest.push(chars[i + 1]);
                         i += 2;
                     }
@@ -2772,8 +2784,8 @@ impl Parser {
                 ' ' | '\t' | '\n' | '\r' => {
                     break;
                 }
-                '\\' if i + 1 < chars.len() => {
-                    // Backslash escape
+                '\\' if i + 1 < chars.len() && self.is_ascii_punctuation(chars[i + 1]) => {
+                    // Backslash escape of ASCII punctuation
                     dest.push(chars[i + 1]);
                     i += 2;
                 }
@@ -2836,8 +2848,8 @@ impl Parser {
                     let byte_offset = chars[..=i].iter().map(|c| c.len_utf8()).sum();
                     return Some((title, byte_offset));
                 }
-                '\\' if i + 1 < chars.len() => {
-                    // Backslash escape
+                '\\' if i + 1 < chars.len() && self.is_ascii_punctuation(chars[i + 1]) => {
+                    // Backslash escape of ASCII punctuation
                     title.push(chars[i + 1]);
                     i += 2;
                 }
