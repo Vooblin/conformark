@@ -46,7 +46,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
    - ⏳ Inline parsing (Phase 2):
      - Emphasis, links, code spans, images
 2. **AST** (`src/ast.rs`): `Node` enum with 9 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`. Expand incrementally as features are added.
-3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children.
+3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children. **Special handling for `ListItem`**: detects nested block elements (checks for `</p>`, `</blockquote>`, etc.) and adjusts formatting accordingly.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
 5. **Streaming API**: Not yet implemented.
 
@@ -174,6 +174,7 @@ Use latest stable features. Check for breaking changes when they arise.
        // Include blank lines in code block
    }
    ```
+   **Pattern used elsewhere**: Setext heading detection also uses lookahead (checks next line for underline before committing to paragraph parsing).
 
 4. **Tab Handling**: Complex partial tab removal (tabs = 4 spaces to next multiple of 4)
    ```rust
@@ -251,8 +252,8 @@ Use latest stable features. Check for breaking changes when they arise.
 ```
 src/
   lib.rs           # Public API: markdown_to_html()
-  ast.rs           # Node enum (6 variants currently)
-  parser.rs        # Parser struct (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, paragraphs)
+  ast.rs           # Node enum (9 variants currently)
+  parser.rs        # Parser struct (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, lists, paragraphs)
   renderer.rs      # HtmlRenderer with escape_html()
   main.rs          # Binary entry point (if needed)
 
@@ -290,7 +291,22 @@ src/
 
 ### Critical Parsing Details (Currently Implemented)
 
-1. **Fence Detection**: Backticks or tildes, 3+ characters, max 3 spaces indentation
+1. **Parser Ordering Matters**: The `parse()` method checks block types in a specific order to avoid false positives. This order is critical:
+   ```rust
+   // Order in Parser::parse() main loop:
+   1. ATX headings (before thematic breaks, since ### could be heading or break)
+   2. Thematic breaks (before lists/paragraphs)
+   3. Blockquote start
+   4. List start (before code blocks)
+   5. Fenced code blocks (MUST come before indented code)
+   6. Indented code blocks
+   7. Blank lines (skip)
+   8. Setext headings (requires lookahead to next line)
+   9. Paragraphs (fallback)
+   ```
+   **Why this matters**: Fenced code blocks can have up to 3 spaces indentation, so they must be checked before indented code blocks (which require 4+ spaces). ATX headings like `### foo` must be checked before thematic breaks to avoid misinterpretation.
+
+2. **Fence Detection**: Backticks or tildes, 3+ characters, max 3 spaces indentation
    ```rust
    fn is_fenced_code_start(&self, line: &str) -> Option<(char, usize, usize)> {
        // Returns (fence_char, fence_length, indent)

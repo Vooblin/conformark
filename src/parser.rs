@@ -58,20 +58,20 @@ impl Parser {
             // Try to parse Setext heading (check if next line is underline)
             else if i + 1 < lines.len() {
                 if let Some((level, lines_consumed)) = self.parse_setext_heading(&lines[i..]) {
-                    blocks.push(Node::Heading {
-                        level,
-                        children: vec![Node::Text(lines[i].trim().to_string())],
-                    });
+                    let children = self.parse_inline(lines[i].trim());
+                    blocks.push(Node::Heading { level, children });
                     i += lines_consumed;
                 } else {
                     // Not a Setext heading, treat as paragraph
-                    blocks.push(Node::Paragraph(vec![Node::Text(line.to_string())]));
+                    let children = self.parse_inline(line);
+                    blocks.push(Node::Paragraph(children));
                     i += 1;
                 }
             }
             // Last line with no possibility of Setext underline
             else {
-                blocks.push(Node::Paragraph(vec![Node::Text(line.to_string())]));
+                let children = self.parse_inline(line);
+                blocks.push(Node::Paragraph(children));
                 i += 1;
             }
         }
@@ -333,9 +333,11 @@ impl Parser {
         let text = after_hashes.trim();
         let text = text.trim_end_matches(['#', ' ', '\t']);
 
+        let children = self.parse_inline(text);
+
         Some(Node::Heading {
             level: hash_count as u8,
-            children: vec![Node::Text(text.to_string())],
+            children,
         })
     }
 
@@ -712,5 +714,91 @@ fn count_leading_spaces(line: &str) -> usize {
 impl Default for Parser {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Parser {
+    /// Parse inline elements (code spans, emphasis, links, etc.) from text
+    fn parse_inline(&self, text: &str) -> Vec<Node> {
+        let mut nodes = Vec::new();
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            // Try to parse code span
+            if chars[i] == '`' {
+                // Count opening backticks
+                let mut backtick_count = 0;
+                let start = i;
+                while i < chars.len() && chars[i] == '`' {
+                    backtick_count += 1;
+                    i += 1;
+                }
+
+                // Look for matching closing backticks
+                let mut found_close = false;
+                let content_start = i;
+                let mut j = i;
+
+                while j < chars.len() {
+                    if chars[j] == '`' {
+                        // Count closing backticks
+                        let close_start = j;
+                        let mut close_count = 0;
+                        while j < chars.len() && chars[j] == '`' {
+                            close_count += 1;
+                            j += 1;
+                        }
+
+                        if close_count == backtick_count {
+                            // Found matching close
+                            let content_end = close_start;
+                            let mut content: String =
+                                chars[content_start..content_end].iter().collect();
+
+                            // Convert line endings to spaces
+                            content = content.replace(['\n', '\r'], " ");
+
+                            // Strip single leading and trailing space if content has both and isn't all spaces
+                            if content.len() > 2
+                                && content.starts_with(' ')
+                                && content.ends_with(' ')
+                                && !content.trim().is_empty()
+                            {
+                                content = content[1..content.len() - 1].to_string();
+                            }
+
+                            nodes.push(Node::Code(content));
+                            i = j;
+                            found_close = true;
+                            break;
+                        }
+                    } else {
+                        j += 1;
+                    }
+                }
+
+                if !found_close {
+                    // No matching close found, treat opening backticks as literal text
+                    nodes.push(Node::Text(chars[start..i].iter().collect()));
+                }
+            } else {
+                // Collect regular text until next special character
+                let text_start = i;
+                while i < chars.len() && chars[i] != '`' {
+                    i += 1;
+                }
+                if i > text_start {
+                    nodes.push(Node::Text(chars[text_start..i].iter().collect()));
+                }
+            }
+        }
+
+        // If no inline elements found, return single text node
+        if nodes.is_empty() && !text.is_empty() {
+            nodes.push(Node::Text(text.to_string()));
+        }
+
+        nodes
     }
 }
