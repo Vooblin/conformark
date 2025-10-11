@@ -1470,8 +1470,10 @@ impl Parser {
                 break;
             }
 
-            // Stop on indented code block (4+ spaces)
-            if self.is_indented_code_line(line) {
+            // Stop on indented code block (4+ spaces) - but ONLY on the first line
+            // Per CommonMark spec: "Lines after the first may be indented any amount,
+            // since indented code blocks cannot interrupt paragraphs."
+            if i == 0 && self.is_indented_code_line(line) {
                 break;
             }
 
@@ -1497,12 +1499,18 @@ impl Parser {
         }
 
         // Join lines with newlines and parse inline content
-        // Per CommonMark spec: remove initial and final spaces/tabs from paragraph content
-        let text = paragraph_lines.join("\n");
-        let trimmed_text = text
-            .trim_start_matches([' ', '\t'])
-            .trim_end_matches([' ', '\t']);
-        let children = self.parse_inline(trimmed_text);
+        // Per CommonMark spec: "The paragraph's raw content is formed by concatenating
+        // the lines and removing initial and final spaces or tabs."
+        // This means trimming each line, then joining with newlines
+        let trimmed_lines: Vec<&str> = paragraph_lines
+            .iter()
+            .map(|line| {
+                line.trim_start_matches([' ', '\t'])
+                    .trim_end_matches([' ', '\t'])
+            })
+            .collect();
+        let text = trimmed_lines.join("\n");
+        let children = self.parse_inline(&text);
 
         (Node::Paragraph(children), i)
     }
