@@ -1184,11 +1184,6 @@ impl Parser {
         while i < lines.len() {
             let line = lines[i];
 
-            // Check if this is a new list item
-            if self.is_list_start(line).is_some() {
-                break;
-            }
-
             // Blank line
             if line.trim().is_empty() {
                 has_blank = true;
@@ -1199,6 +1194,17 @@ impl Parser {
 
             // Check indentation to see if line belongs to this item
             let line_indent = self.count_indent_columns(line);
+
+            // Check if this is a new list item at the same level or less indented
+            if let Some(_list_type) = self.is_list_start(line) {
+                // If the list marker is at our content indent or more, it's a nested list
+                // Include it in the item content
+                if line_indent < content_indent {
+                    // List marker is less indented - it's a sibling or parent item
+                    break;
+                }
+                // Otherwise, it's indented enough to be a nested list, include it
+            }
 
             if line_indent >= content_indent {
                 // Remove the item indentation and add to item
@@ -1315,7 +1321,7 @@ impl Parser {
         for (idx, ch) in line.chars().enumerate() {
             if removed >= cols {
                 // We've removed enough, return the rest
-                return line.chars().skip(chars_to_skip).collect();
+                return result + &line.chars().skip(chars_to_skip).collect::<String>();
             }
 
             match ch {
@@ -1339,7 +1345,7 @@ impl Parser {
                 }
                 _ => {
                     // Hit non-whitespace, stop removing
-                    return line.chars().skip(chars_to_skip).collect();
+                    return result + &line.chars().skip(chars_to_skip).collect::<String>();
                 }
             }
         }
