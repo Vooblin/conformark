@@ -190,13 +190,18 @@ impl Parser {
 
     fn remove_code_indent(&self, line: &str) -> String {
         // Remove up to 4 columns of indentation
-        // Tabs advance to next multiple of 4 columns
+        self.remove_indent_columns(line, 4)
+    }
+
+    /// Remove up to `columns` worth of indentation from a line
+    /// Handles tabs properly (tabs advance to next multiple of 4)
+    fn remove_indent_columns(&self, line: &str, columns: usize) -> String {
         let mut col = 0;
         let mut chars = line.chars().peekable();
         let mut result = String::new();
 
-        // Skip up to 4 columns of indentation
-        while col < 4 {
+        // Skip up to `columns` of indentation
+        while col < columns {
             match chars.peek() {
                 Some(&' ') => {
                     chars.next();
@@ -205,17 +210,17 @@ impl Parser {
                 Some(&'\t') => {
                     chars.next();
                     let next_tab_stop = (col / 4 + 1) * 4;
-                    if next_tab_stop <= 4 {
-                        // Tab fits entirely within the 4 columns to remove
+                    if next_tab_stop <= columns {
+                        // Tab fits entirely within the columns to remove
                         col = next_tab_stop;
                     } else {
-                        // Partial tab: it extends beyond 4 columns
+                        // Partial tab: it extends beyond columns
                         // Add spaces for the part that extends beyond
-                        let spaces_to_add = next_tab_stop - 4;
+                        let spaces_to_add = next_tab_stop - columns;
                         for _ in 0..spaces_to_add {
                             result.push(' ');
                         }
-                        col = 4;
+                        col = columns;
                     }
                 }
                 _ => break,
@@ -267,7 +272,7 @@ impl Parser {
         lines: &[&str],
         fence_char: char,
         fence_len: usize,
-        _indent: usize,
+        fence_indent: usize,
     ) -> (Node, usize) {
         if lines.is_empty() {
             return (
@@ -311,8 +316,10 @@ impl Parser {
                 break;
             }
 
-            // Add this line to the code block
-            code_lines.push(line.to_string());
+            // Remove up to fence_indent spaces from the line
+            // Per CommonMark spec: if fence is indented N spaces, remove up to N spaces from each line
+            let line_with_indent_removed = self.remove_indent_columns(line, fence_indent);
+            code_lines.push(line_with_indent_removed);
             i += 1;
         }
 

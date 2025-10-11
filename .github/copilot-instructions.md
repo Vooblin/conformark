@@ -6,7 +6,7 @@
 
 **Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,350 lines - order matters!).
 
-**Current status**: 72.5% coverage (475/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, tab handling in nested contexts.
+**Current status**: 73.0% coverage (478/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, remaining tab/indentation edge cases.
 
 ## Quick Start for AI Agents
 
@@ -306,7 +306,7 @@ src/
 ## Common Pitfalls & Troubleshooting
 
 **Common Test Failure Patterns:**
-The majority of current failures (180/655 tests) fall into these categories:
+The majority of current failures (177/655 tests) fall into these categories:
 1. **Emphasis and strong emphasis**: Full delimiter run algorithm needed (132 tests in section)
 2. **Link edge cases**: Complex link scenarios, reference definitions, URL encoding (90 tests)
 3. **List items**: Nested lists with proper indentation tracking (48 tests)
