@@ -4,7 +4,9 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (order matters!).
+
+**Where to focus next**: The largest test sections are "Emphasis and strong emphasis" (132 tests), "Links" (90 tests), and "List items" (48 tests). Current blockers: multi-line list items, nested lists, reference-style links/images, and full emphasis delimiter algorithm.
 
 ## Quick Start for AI Agents
 
@@ -20,6 +22,19 @@
 3. Add rendering in `src/renderer.rs` (pattern match on new node variant)
 4. Verify: `cargo test -- --nocapture` shows increased pass rate
 5. CI checks: `cargo fmt --check && cargo clippy && cargo doc`
+
+**Test distribution (prioritize high-impact areas):**
+- Emphasis and strong emphasis: 132 tests (20% of suite)
+- Links: 90 tests (14%)
+- List items: 48 tests (7%)
+- HTML blocks: 46 tests (7%)
+- Link reference definitions: 27 tests (4%)
+
+**Quick wins for boosting coverage:**
+- Complete multi-line list item support (48 tests)
+- Implement reference-style links (27 tests)
+- Add backslash escape handling (13 tests)
+- Complete hard line breaks (15 tests)
 
 ## Project Overview
 
@@ -54,7 +69,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
      - Reference-style images and links
      - Full delimiter run algorithm for emphasis
      - HTML entities, autolinks
-2. **AST** (`src/ast.rs`): `Node` enum with 15 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span), `Emphasis`, `Strong`, `Link`, `Image`. Expand incrementally as features are added.
+2. **AST** (`src/ast.rs`): `Node` enum with 16 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span), `Emphasis`, `Strong`, `Link`, `Image`, `HardBreak`. Expand incrementally as features are added.
 3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children. **Special handling for `ListItem`**: detects nested block elements (checks for `</p>`, `</blockquote>`, etc.) and adjusts formatting accordingly.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
 5. **Streaming API**: Not yet implemented.
@@ -99,14 +114,15 @@ cargo doc --no-deps --verbose
 ### TDD Workflow (Critical)
 1. **Find relevant tests**: Search `tests/data/tests.json` by section (e.g., "Tabs", "Headings", "Lists")
    ```bash
-   # List all sections
+   # List all sections (26 total)
    jq -r '.[].section' tests/data/tests.json | sort -u
    
    # Get all tests for a section
    jq '.[] | select(.section == "ATX headings")' tests/data/tests.json
    
-   # Count tests per section
+   # Count tests per section (prioritize high-impact areas)
    jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn
+   # Top sections: Emphasis (132), Links (90), List items (48)
    
    # Find failing test by example number
    jq '.[] | select(.example == 123)' tests/data/tests.json
@@ -261,8 +277,8 @@ Use latest stable features. Minimum Rust version: 1.85+. Check for edition-relat
 ```
 src/
   lib.rs           # Public API: markdown_to_html()
-  ast.rs           # Node enum (14 variants currently)
-  parser.rs        # Parser struct (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, lists, paragraphs, basic inline parsing with links)
+  ast.rs           # Node enum (16 variants currently)
+  parser.rs        # Parser struct (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, paragraphs, basic inline parsing with links)
   renderer.rs      # HtmlRenderer with escape_html()
   main.rs          # Binary entry point (if needed)
 
