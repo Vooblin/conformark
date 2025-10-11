@@ -157,9 +157,10 @@ impl Parser {
                 }
 
                 if j < lines.len() && self.is_indented_code_line(lines[j]) {
-                    // Include blank lines
-                    for _ in i..j {
-                        code_lines.push(String::new());
+                    // Include blank lines, but dedent them too (they might have spaces)
+                    for &line in lines.iter().take(j).skip(i) {
+                        let dedented = self.remove_code_indent(line);
+                        code_lines.push(dedented);
                     }
                     i = j;
                 } else {
