@@ -734,6 +734,15 @@ impl Parser {
                 continue;
             }
 
+            // Try to parse link
+            if chars[i] == '['
+                && let Some((link_node, new_i)) = self.try_parse_link(&chars, i)
+            {
+                nodes.push(link_node);
+                i = new_i;
+                continue;
+            }
+
             // Try to parse emphasis/strong with * or _
             if (chars[i] == '*' || chars[i] == '_')
                 && let Some((emph_node, new_i)) = self.try_parse_emphasis(&chars, i)
@@ -745,7 +754,12 @@ impl Parser {
 
             // Collect regular text until next special character
             let text_start = i;
-            while i < chars.len() && chars[i] != '`' && chars[i] != '*' && chars[i] != '_' {
+            while i < chars.len()
+                && chars[i] != '`'
+                && chars[i] != '*'
+                && chars[i] != '_'
+                && chars[i] != '['
+            {
                 i += 1;
             }
             if i > text_start {
@@ -929,5 +943,145 @@ impl Parser {
         }
 
         None
+    }
+
+    fn try_parse_link(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
+        // Link syntax: [link text](destination "title")
+        // We start at '['
+        let mut i = start + 1;
+
+        // Find the closing ']' for link text
+        let mut bracket_depth = 1;
+        let text_start = i;
+
+        while i < chars.len() {
+            if chars[i] == '[' {
+                bracket_depth += 1;
+            } else if chars[i] == ']' {
+                bracket_depth -= 1;
+                if bracket_depth == 0 {
+                    break;
+                }
+            } else if chars[i] == '\\' && i + 1 < chars.len() {
+                // Skip escaped character
+                i += 1;
+            }
+            i += 1;
+        }
+
+        if i >= chars.len() || chars[i] != ']' {
+            return None; // No closing bracket
+        }
+
+        let text_end = i;
+        i += 1; // Move past ']'
+
+        // Now we need '(' for inline link
+        if i >= chars.len() || chars[i] != '(' {
+            return None; // Not an inline link
+        }
+        i += 1; // Move past '('
+
+        // Skip whitespace
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+
+        // Parse destination (either <...> or raw)
+        let destination: String;
+        if i < chars.len() && chars[i] == '<' {
+            // Angle-bracket enclosed destination
+            i += 1;
+            let dest_start = i;
+            while i < chars.len() && chars[i] != '>' && chars[i] != '\n' {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 1; // Skip escaped character
+                }
+                i += 1;
+            }
+            if i >= chars.len() || chars[i] != '>' {
+                return None; // Unclosed angle bracket
+            }
+            destination = chars[dest_start..i].iter().collect();
+            i += 1; // Move past '>'
+        } else {
+            // Raw destination (no spaces allowed unless in parens)
+            let dest_start = i;
+            let mut paren_depth = 0;
+            while i < chars.len() {
+                if chars[i] == '(' {
+                    paren_depth += 1;
+                } else if chars[i] == ')' {
+                    if paren_depth == 0 {
+                        break; // End of destination
+                    }
+                    paren_depth -= 1;
+                } else if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 1; // Skip escaped character
+                } else if chars[i].is_whitespace() {
+                    break; // Whitespace ends destination
+                }
+                i += 1;
+            }
+            destination = chars[dest_start..i].iter().collect();
+
+            // Check for invalid characters in destination (spaces outside parens)
+            if destination.contains(|c: char| c.is_whitespace()) && paren_depth == 0 {
+                return None; // Invalid destination
+            }
+        }
+
+        // Skip whitespace
+        while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t') {
+            i += 1;
+        }
+
+        // Check for optional title
+        let title: Option<String>;
+        if i < chars.len() && (chars[i] == '"' || chars[i] == '\'' || chars[i] == '(') {
+            let quote_char = if chars[i] == '(' { ')' } else { chars[i] };
+            i += 1; // Move past opening quote
+            let title_start = i;
+
+            while i < chars.len() && chars[i] != quote_char {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 1; // Skip escaped character
+                }
+                i += 1;
+            }
+
+            if i >= chars.len() || chars[i] != quote_char {
+                return None; // Unclosed title
+            }
+
+            title = Some(chars[title_start..i].iter().collect());
+            i += 1; // Move past closing quote
+
+            // Skip trailing whitespace
+            while i < chars.len() && chars[i].is_whitespace() && chars[i] != ')' {
+                i += 1;
+            }
+        } else {
+            title = None;
+        }
+
+        // Expect closing ')'
+        if i >= chars.len() || chars[i] != ')' {
+            return None;
+        }
+        i += 1; // Move past ')'
+
+        // Parse the link text
+        let link_text: String = chars[text_start..text_end].iter().collect();
+        let children = self.parse_inline(&link_text);
+
+        Some((
+            Node::Link {
+                destination,
+                title,
+                children,
+            },
+            i,
+        ))
     }
 }

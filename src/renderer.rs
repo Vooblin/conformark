@@ -84,6 +84,23 @@ fn render_node(node: &Node) -> String {
             let content: String = children.iter().map(render_node).collect();
             format!("<strong>{}</strong>", content)
         }
+        Node::Link {
+            destination,
+            title,
+            children,
+        } => {
+            let content: String = children.iter().map(render_node).collect();
+            if let Some(title_text) = title {
+                format!(
+                    "<a href=\"{}\" title=\"{}\">{}</a>",
+                    escape_html(destination),
+                    escape_html(title_text),
+                    content
+                )
+            } else {
+                format!("<a href=\"{}\">{}</a>", escape_html(destination), content)
+            }
+        }
     }
 }
 

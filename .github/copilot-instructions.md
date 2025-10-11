@@ -3,13 +3,13 @@
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (32.4% baseline - 212/655 tests)
+1. Run `cargo test -- --nocapture` to see current coverage (38.9% baseline - 255/655 tests)
 2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
 3. Count tests in a section: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
 4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules
 
 **To add a feature:**
-1. Add `Node` variant to `src/ast.rs` (e.g., `BlockQuote(Vec<Node>)`)
+1. Add `Node` variant to `src/ast.rs` (e.g., `Emphasis(Vec<Node>)`)
 2. Implement parsing in `src/parser.rs` (use `is_*` predicates, `parse_*` methods returning `(Node, usize)`)
 3. Add rendering in `src/renderer.rs` (pattern match on new node variant)
 4. Verify: `cargo test -- --nocapture` shows increased pass rate
@@ -24,7 +24,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (**32.4% coverage** - 212/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
+**Current Status**: Test harness complete (**38.9% coverage** - 255/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs, basic inline parsing with emphasis/strong/code spans/inline links), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
 
 ## Architecture & Design Goals
 
@@ -38,14 +38,17 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
    - ✅ Block quotes (`>` prefix, recursive parsing)
    - ✅ Basic lists (unordered `-`, `+`, `*` and ordered `1.`, `2)` markers, flat structure only)
    - ✅ Basic paragraphs (non-empty, non-heading lines)
+   - ✅ Basic inline parsing (emphasis `*`/`_`, strong `**`/`__`, code spans with backticks, inline links)
    - ⏳ Advanced list features needed:
      - Multi-line list items with continuation
      - Nested lists
      - List item containing multiple block elements (paragraphs, code blocks, etc.)
      - Tight vs loose list detection
-   - ⏳ Inline parsing (Phase 2):
-     - Emphasis, links, code spans, images
-2. **AST** (`src/ast.rs`): `Node` enum with 10 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span). Expand incrementally as features are added.
+   - ⏳ Advanced inline parsing (Phase 2):
+     - Images
+     - Full delimiter run algorithm for emphasis
+     - HTML entities, autolinks
+2. **AST** (`src/ast.rs`): `Node` enum with 14 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span), `Emphasis`, `Strong`, `Link`. Expand incrementally as features are added.
 3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children. **Special handling for `ListItem`**: detects nested block elements (checks for `</p>`, `</blockquote>`, etc.) and adjusts formatting accordingly.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
 5. **Streaming API**: Not yet implemented.
@@ -64,7 +67,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 # Build project (Rust 2024 edition)
 cargo build --verbose
 
-# Run all tests including 655 spec tests (currently 212 passing, 32.4% coverage)
+# Run all tests including 655 spec tests (currently 255 passing, 38.9% coverage)
 cargo test --verbose
 
 # See detailed test output with pass/fail stats
@@ -104,7 +107,7 @@ cargo doc --no-deps --verbose
    ```
 2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
 3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 32.4%)
+4. **Track progress**: Coverage % increases as features are added (currently 38.9%)
 5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
 
 ### Dependencies
@@ -252,8 +255,8 @@ Use latest stable features. Check for breaking changes when they arise.
 ```
 src/
   lib.rs           # Public API: markdown_to_html()
-  ast.rs           # Node enum (10 variants currently)
-  parser.rs        # Parser struct (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, lists, paragraphs)
+  ast.rs           # Node enum (14 variants currently)
+  parser.rs        # Parser struct (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, lists, paragraphs, basic inline parsing with links)
   renderer.rs      # HtmlRenderer with escape_html()
   main.rs          # Binary entry point (if needed)
 
@@ -337,11 +340,29 @@ src/
    - Cannot have spaces between underline characters
    - Most tests require inline parsing for full compatibility
 
+5. **Link Parsing Pattern** (`src/parser.rs`): Inline link syntax `[text](dest "title")`
+   ```rust
+   fn try_parse_link(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
+       // 1. Find closing ']' for link text (track bracket depth)
+       // 2. Expect '(' after ']'
+       // 3. Parse destination: <...> or raw (no spaces unless in parens)
+       // 4. Optional title in quotes (", ', or parens)
+       // 5. Expect closing ')'
+       // Returns (Node::Link{destination, title, children}, position)
+   }
+   ```
+   - Link text can contain nested brackets (track depth)
+   - Destination can be angle-bracket enclosed `<...>` or raw
+   - Raw destinations allow balanced parens but no spaces
+   - Title is optional, can use `"`, `'`, or `()` delimiters
+   - Backslash escapes work in all parts
+
 ### Future Features (Not Yet Implemented)
 
+- **Images**: Similar to links but with `!` prefix
+- **Reference Links**: `[text][label]` with separate `[label]: url` definitions
 - **HTML Entities**: 2125+ HTML5 named entities, numeric entities (`&#123;`, `&#xAB;`)
-- **Link Processing**: Reference label normalization, percent-encoding, balanced parens
-- **Emphasis Algorithm**: Delimiter run algorithm (not greedy), left/right flanking rules
+- **Emphasis Algorithm**: Full delimiter run algorithm (currently simplified)
 - **Streaming API**: For large documents
 - **Performance**: Avoid backtracking, lazy evaluation, benchmark vs cmark/pulldown-cmark
 
