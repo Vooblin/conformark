@@ -59,18 +59,59 @@ fn render_node(node: &Node) -> String {
             }
         }
         Node::ListItem(children) => {
-            let content: String = children.iter().map(render_node).collect();
-            // Check if content has block-level elements (contains newlines from nested blocks)
-            if content.contains("</p>")
-                || content.contains("</blockquote>")
-                || content.contains("</pre>")
-                || content.contains("</ul>")
-                || content.contains("</ol>")
-                || content.contains("<hr />")
-            {
-                format!("<li>\n{}</li>\n", content)
+            // Check if we have a mix of inline and block content
+            let has_blocks = children.iter().any(|child| {
+                matches!(
+                    child,
+                    Node::Paragraph(_)
+                        | Node::BlockQuote(_)
+                        | Node::CodeBlock { .. }
+                        | Node::UnorderedList(_)
+                        | Node::OrderedList { .. }
+                        | Node::ThematicBreak
+                )
+            });
+
+            if has_blocks {
+                // Render inline elements first (if any) on the same line as <li>
+                let mut inline_content = String::new();
+                let mut block_content = String::new();
+
+                for child in children {
+                    match child {
+                        Node::Text(_)
+                        | Node::Code(_)
+                        | Node::Emphasis(_)
+                        | Node::Strong(_)
+                        | Node::Link { .. }
+                        | Node::Image { .. }
+                        | Node::HtmlInline(_)
+                        | Node::HardBreak => {
+                            inline_content.push_str(&render_node(child));
+                        }
+                        _ => {
+                            block_content.push_str(&render_node(child));
+                        }
+                    }
+                }
+
+                if !inline_content.is_empty() && !block_content.is_empty() {
+                    // Mix of inline and block: inline on same line, blocks indented
+                    format!(
+                        "<li>{}\n{}</li>\n",
+                        inline_content.trim_end(),
+                        block_content
+                    )
+                } else if !block_content.is_empty() {
+                    // Only blocks: newline after <li>
+                    format!("<li>\n{}</li>\n", block_content)
+                } else {
+                    // Only inline (shouldn't happen if has_blocks is true, but handle it)
+                    format!("<li>{}</li>\n", inline_content.trim_end())
+                }
             } else {
-                // Simple content - no wrapping paragraph, trim trailing newline from Text
+                // Simple inline content only
+                let content: String = children.iter().map(render_node).collect();
                 let trimmed = content.trim_end_matches('\n');
                 format!("<li>{}</li>\n", trimmed)
             }
