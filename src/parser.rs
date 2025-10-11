@@ -725,72 +725,37 @@ impl Parser {
         let mut i = 0;
 
         while i < chars.len() {
-            // Try to parse code span
-            if chars[i] == '`' {
-                // Count opening backticks
-                let mut backtick_count = 0;
-                let start = i;
-                while i < chars.len() && chars[i] == '`' {
-                    backtick_count += 1;
-                    i += 1;
-                }
+            // Try to parse code span first (takes precedence)
+            if chars[i] == '`'
+                && let Some((code_node, new_i)) = self.try_parse_code_span(&chars, i)
+            {
+                nodes.push(code_node);
+                i = new_i;
+                continue;
+            }
 
-                // Look for matching closing backticks
-                let mut found_close = false;
-                let content_start = i;
-                let mut j = i;
+            // Try to parse emphasis/strong with * or _
+            if (chars[i] == '*' || chars[i] == '_')
+                && let Some((emph_node, new_i)) = self.try_parse_emphasis(&chars, i)
+            {
+                nodes.push(emph_node);
+                i = new_i;
+                continue;
+            }
 
-                while j < chars.len() {
-                    if chars[j] == '`' {
-                        // Count closing backticks
-                        let close_start = j;
-                        let mut close_count = 0;
-                        while j < chars.len() && chars[j] == '`' {
-                            close_count += 1;
-                            j += 1;
-                        }
+            // Collect regular text until next special character
+            let text_start = i;
+            while i < chars.len() && chars[i] != '`' && chars[i] != '*' && chars[i] != '_' {
+                i += 1;
+            }
+            if i > text_start {
+                nodes.push(Node::Text(chars[text_start..i].iter().collect()));
+            }
 
-                        if close_count == backtick_count {
-                            // Found matching close
-                            let content_end = close_start;
-                            let mut content: String =
-                                chars[content_start..content_end].iter().collect();
-
-                            // Convert line endings to spaces
-                            content = content.replace(['\n', '\r'], " ");
-
-                            // Strip single leading and trailing space if content has both and isn't all spaces
-                            if content.len() > 2
-                                && content.starts_with(' ')
-                                && content.ends_with(' ')
-                                && !content.trim().is_empty()
-                            {
-                                content = content[1..content.len() - 1].to_string();
-                            }
-
-                            nodes.push(Node::Code(content));
-                            i = j;
-                            found_close = true;
-                            break;
-                        }
-                    } else {
-                        j += 1;
-                    }
-                }
-
-                if !found_close {
-                    // No matching close found, treat opening backticks as literal text
-                    nodes.push(Node::Text(chars[start..i].iter().collect()));
-                }
-            } else {
-                // Collect regular text until next special character
-                let text_start = i;
-                while i < chars.len() && chars[i] != '`' {
-                    i += 1;
-                }
-                if i > text_start {
-                    nodes.push(Node::Text(chars[text_start..i].iter().collect()));
-                }
+            // If we didn't move forward, just consume one character as text
+            if i == text_start {
+                nodes.push(Node::Text(chars[i].to_string()));
+                i += 1;
             }
         }
 
@@ -800,5 +765,169 @@ impl Parser {
         }
 
         nodes
+    }
+
+    fn try_parse_code_span(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
+        let mut i = start;
+        let mut backtick_count = 0;
+
+        // Count opening backticks
+        while i < chars.len() && chars[i] == '`' {
+            backtick_count += 1;
+            i += 1;
+        }
+
+        let content_start = i;
+        let mut j = i;
+
+        // Look for matching closing backticks
+        while j < chars.len() {
+            if chars[j] == '`' {
+                let close_start = j;
+                let mut close_count = 0;
+                while j < chars.len() && chars[j] == '`' {
+                    close_count += 1;
+                    j += 1;
+                }
+
+                if close_count == backtick_count {
+                    // Found matching close
+                    let mut content: String = chars[content_start..close_start].iter().collect();
+
+                    // Convert line endings to spaces
+                    content = content.replace(['\n', '\r'], " ");
+
+                    // Strip single leading and trailing space if present and content isn't all spaces
+                    if content.len() > 2
+                        && content.starts_with(' ')
+                        && content.ends_with(' ')
+                        && !content.trim().is_empty()
+                    {
+                        content = content[1..content.len() - 1].to_string();
+                    }
+
+                    return Some((Node::Code(content), j));
+                }
+            } else {
+                j += 1;
+            }
+        }
+
+        None
+    }
+
+    fn try_parse_emphasis(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
+        let delimiter = chars[start];
+        let mut i = start;
+        let mut count = 0;
+
+        // Count delimiters
+        while i < chars.len() && chars[i] == delimiter {
+            count += 1;
+            i += 1;
+        }
+
+        // Check if this is a left-flanking delimiter run
+        if !self.is_left_flanking(chars, start, count) {
+            return None;
+        }
+
+        // Try strong emphasis first (** or __)
+        if count >= 2
+            && let Some((content, end_pos)) = self.find_emphasis_close(chars, i, delimiter, 2)
+        {
+            let inner_text: String = chars[i..content].iter().collect();
+            let inner_nodes = self.parse_inline(&inner_text);
+            return Some((Node::Strong(inner_nodes), end_pos));
+        }
+
+        // Try regular emphasis (* or _)
+        if count >= 1
+            && let Some((content, end_pos)) = self.find_emphasis_close(chars, i, delimiter, 1)
+        {
+            let inner_text: String = chars[i..content].iter().collect();
+            let inner_nodes = self.parse_inline(&inner_text);
+            return Some((Node::Emphasis(inner_nodes), end_pos));
+        }
+
+        None
+    }
+
+    fn is_left_flanking(&self, chars: &[char], pos: usize, count: usize) -> bool {
+        let after_pos = pos + count;
+
+        // Must not be followed by whitespace
+        if after_pos >= chars.len() {
+            return false;
+        }
+
+        let after_char = chars[after_pos];
+        if after_char.is_whitespace() {
+            return false;
+        }
+
+        // For underscore, must not be preceded by alphanumeric (intraword restriction)
+        if chars[pos] == '_' && pos > 0 {
+            let before_char = chars[pos - 1];
+            if before_char.is_alphanumeric() {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn is_right_flanking(&self, chars: &[char], pos: usize, count: usize) -> bool {
+        // Must not be preceded by whitespace
+        if pos == 0 {
+            return false;
+        }
+
+        let before_char = chars[pos - 1];
+        if before_char.is_whitespace() {
+            return false;
+        }
+
+        // For underscore, must not be followed by alphanumeric (intraword restriction)
+        if pos + count < chars.len() && chars[pos] == '_' {
+            let after_char = chars[pos + count];
+            if after_char.is_alphanumeric() {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn find_emphasis_close(
+        &self,
+        chars: &[char],
+        start: usize,
+        delimiter: char,
+        needed_count: usize,
+    ) -> Option<(usize, usize)> {
+        let mut i = start;
+
+        while i < chars.len() {
+            if chars[i] == delimiter {
+                let delim_start = i;
+                let mut count = 0;
+
+                while i < chars.len() && chars[i] == delimiter {
+                    count += 1;
+                    i += 1;
+                }
+
+                // Check if this is a valid right-flanking delimiter run
+                if count >= needed_count && self.is_right_flanking(chars, delim_start, count) {
+                    // Return content end position and position after delimiters
+                    return Some((delim_start, delim_start + needed_count));
+                }
+            } else {
+                i += 1;
+            }
+        }
+
+        None
     }
 }
