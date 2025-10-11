@@ -980,6 +980,12 @@ impl Parser {
         let mut has_blank_between_items = false;
 
         while i < lines.len() {
+            // Check for thematic break first - it can interrupt a list
+            if self.is_thematic_break(lines[i]) {
+                // Thematic break interrupts the list
+                break;
+            }
+
             // Check if current line is a list item of the same type
             if let Some(current_type) = self.is_list_start(lines[i]) {
                 if !list_type.is_compatible(&current_type) {

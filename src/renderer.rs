@@ -66,6 +66,7 @@ fn render_node(node: &Node) -> String {
                 || content.contains("</pre>")
                 || content.contains("</ul>")
                 || content.contains("</ol>")
+                || content.contains("<hr />")
             {
                 format!("<li>\n{}</li>\n", content)
             } else {
