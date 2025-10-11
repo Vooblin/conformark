@@ -263,6 +263,15 @@ impl Parser {
             return None;
         }
 
+        // Per CommonMark spec: info string after backtick fence cannot contain backticks
+        // This prevents inline code like ``` ``` from being treated as a fence
+        if fence_char == '`' {
+            let after_fence = &after_indent[fence_len..];
+            if after_fence.contains('`') {
+                return None;
+            }
+        }
+
         Some((fence_char, fence_len, indent))
     }
 
