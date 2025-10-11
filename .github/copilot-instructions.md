@@ -4,14 +4,14 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (2,375 lines - order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (2,667 lines - order matters!).
 
-**Where to focus next**: The largest remaining test sections are "Emphasis and strong emphasis" (132 tests), "Links" (90 tests), and "List items" (48 tests). Current blockers: nested lists, HTML blocks (7 types), and full emphasis delimiter algorithm.
+**Where to focus next**: The largest remaining test sections are "Emphasis and strong emphasis" (132 tests), "Links" (90 tests), and "List items" (48 tests). Current blockers: nested lists, full emphasis delimiter algorithm, and edge cases in HTML blocks/links.
 
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (56.8% baseline - 372/655 tests passing)
+1. Run `cargo test -- --nocapture` to see current coverage (63.1% baseline - 413/655 tests passing)
 2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
 3. Count tests in a section: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
 4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules (9,811 lines, 26 sections)
@@ -31,9 +31,9 @@
 - Link reference definitions: 27 tests (4%)
 
 **Quick wins for boosting coverage:**
-- Implement nested lists (significant portion of 48 list item tests)
-- Complete HTML block parsing (7 different types)
-- Refine emphasis delimiter algorithm
+- Refine emphasis delimiter algorithm (132 tests in this section alone)
+- Complete link edge cases and reference-style links (90 tests)
+- Implement nested lists with proper indentation (48 list item tests)
 
 ## Project Overview
 
@@ -44,7 +44,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (**56.8% coverage** - 372/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, lists with multi-line items and tight/loose detection, paragraphs, inline parsing with emphasis/strong/code spans/inline links/images/autolinks/entities/escapes), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST with reference definition support. Implementation proceeding **incrementally via TDD**.
+**Current Status**: Test harness complete (**63.1% coverage** - 413/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, HTML blocks with 7 different types, lists with multi-line items and tight/loose detection, paragraphs, inline parsing with emphasis/strong/code spans/inline links/images/autolinks/entities/escapes/raw HTML), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST with reference definition support. Implementation proceeding **incrementally via TDD**.
 
 ## Architecture & Design Goals
 
@@ -69,13 +69,13 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
      - HTML entities (`&nbsp;`, `&copy;`) and numeric character refs (`&#35;`, `&#x1F;`)
      - Backslash escapes for ASCII punctuation
      - Hard line breaks (backslash at end of line)
+     - Raw HTML inline (comments, processing instructions, declarations, CDATA, tags)
    - ✅ Link reference definitions `[label]: url "title"` (stored in `HashMap`)
+   - ✅ HTML blocks (7 different types with distinct start/end conditions)
    - ⏳ Advanced features needed:
      - Nested lists (proper indentation tracking)
-     - HTML blocks (7 different types with distinct start/end conditions)
      - Full delimiter run algorithm for emphasis
-     - Raw HTML inline elements
-2. **AST** (`src/ast.rs`): `Node` enum with 16 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span), `Emphasis`, `Strong`, `Link`, `Image`, `HardBreak`. Expand incrementally as features are added.
+2. **AST** (`src/ast.rs`): `Node` enum with 18 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span), `Emphasis`, `Strong`, `Link`, `Image`, `HardBreak`, `HtmlBlock`, `HtmlInline`. Expand incrementally as features are added.
 3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children. **Special handling for `ListItem`**: detects nested block elements (checks for `</p>`, `</blockquote>`, etc.) and adjusts formatting accordingly.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
 5. **Parser State** (`src/parser.rs`): Uses `HashMap<String, (String, Option<String>)>` to store link reference definitions with normalized labels (case-insensitive, whitespace-collapsed).
@@ -95,7 +95,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 # Build project (Rust 2024 edition)
 cargo build --verbose
 
-# Run all tests including 655 spec tests (currently 372 passing, 56.8% coverage)
+# Run all tests including 655 spec tests (currently 413 passing, 63.1% coverage)
 cargo test --verbose
 
 # See detailed test output with pass/fail stats
@@ -136,7 +136,7 @@ cargo doc --no-deps --verbose
    ```
 2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
 3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 56.8%)
+4. **Track progress**: Coverage % increases as features are added (currently 63.1%)
 5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
 
 ### Dependencies
@@ -389,9 +389,7 @@ src/
 ### Future Features (Not Yet Implemented)
 
 - **Nested Lists**: Proper indentation tracking for multi-level list nesting
-- **HTML Blocks**: Seven different start/end condition types
-- **Full Emphasis Algorithm**: Complete delimiter run algorithm per spec
-- **Raw HTML Inline**: Inline HTML tags in paragraphs and text
+- **Full Emphasis Algorithm**: Complete delimiter run algorithm per spec (currently simplified)
 - **Streaming API**: For large documents
 - **Performance**: Avoid backtracking, lazy evaluation, benchmark vs cmark/pulldown-cmark
 
@@ -406,12 +404,12 @@ src/
 ## Troubleshooting
 
 ### Common Test Failure Patterns (Current Implementation Gaps)
-The majority of current failures (283/655 tests) fall into these categories:
-1. **Tab handling in nested contexts**: Tabs within blockquotes, lists, and code blocks need proper expansion
-2. **Nested lists**: Lists within lists with proper indentation tracking
-3. **HTML blocks**: Seven different start/end condition types (46 tests)
-4. **Advanced inline parsing**: Full emphasis delimiter algorithm, raw HTML inline elements
-5. **Edge cases**: Complex list scenarios, indentation edge cases
+The majority of current failures (242/655 tests) fall into these categories:
+1. **Emphasis and strong emphasis**: Full delimiter run algorithm needed (132 tests in section)
+2. **Link edge cases**: Complex link scenarios, reference definitions, and URL encoding (90 tests)
+3. **List items**: Nested lists with proper indentation tracking (48 tests)
+4. **Tab handling in nested contexts**: Tabs within blockquotes, lists, and code blocks
+5. **HTML blocks edge cases**: While 7 types are implemented, some edge cases remain (46 tests total)
 
 ### Tests failing after changes
 ```bash
