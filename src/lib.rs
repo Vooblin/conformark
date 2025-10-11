@@ -22,4 +22,19 @@ mod tests {
     fn test_empty_input() {
         assert_eq!(markdown_to_html(""), "");
     }
+
+    #[test]
+    fn test_basic_image() {
+        let result = markdown_to_html("![foo](/url \"title\")\n");
+        assert_eq!(
+            result,
+            "<p><img src=\"/url\" alt=\"foo\" title=\"title\" /></p>\n"
+        );
+    }
+
+    #[test]
+    fn test_image_without_title() {
+        let result = markdown_to_html("![bar](/path)\n");
+        assert_eq!(result, "<p><img src=\"/path\" alt=\"bar\" /></p>\n");
+    }
 }

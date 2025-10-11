@@ -101,6 +101,28 @@ fn render_node(node: &Node) -> String {
                 format!("<a href=\"{}\">{}</a>", escape_html(destination), content)
             }
         }
+        Node::Image {
+            destination,
+            title,
+            alt_text,
+        } => {
+            // Convert alt_text nodes to plain text (strip formatting)
+            let alt = alt_text_to_string(alt_text);
+            if let Some(title_text) = title {
+                format!(
+                    "<img src=\"{}\" alt=\"{}\" title=\"{}\" />",
+                    escape_html(destination),
+                    escape_html(&alt),
+                    escape_html(title_text)
+                )
+            } else {
+                format!(
+                    "<img src=\"{}\" alt=\"{}\" />",
+                    escape_html(destination),
+                    escape_html(&alt)
+                )
+            }
+        }
         Node::HardBreak => "<br />".to_string(),
     }
 }
@@ -113,6 +135,23 @@ fn escape_html(text: &str) -> String {
             '&' => "&amp;".to_string(),
             '"' => "&quot;".to_string(),
             _ => c.to_string(),
+        })
+        .collect()
+}
+
+/// Convert inline nodes to plain text (for image alt text)
+/// This strips all formatting and just keeps the text content
+fn alt_text_to_string(nodes: &[Node]) -> String {
+    nodes
+        .iter()
+        .map(|node| match node {
+            Node::Text(text) => text.clone(),
+            Node::Code(code) => code.clone(),
+            Node::Emphasis(children) | Node::Strong(children) => alt_text_to_string(children),
+            Node::Link { children, .. } => alt_text_to_string(children),
+            Node::Image { alt_text, .. } => alt_text_to_string(alt_text),
+            Node::HardBreak => "\n".to_string(),
+            _ => String::new(),
         })
         .collect()
 }
