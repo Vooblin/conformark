@@ -32,6 +32,12 @@ impl Parser {
                 blocks.push(blockquote);
                 i += lines_consumed;
             }
+            // Try to parse list (unordered or ordered)
+            else if let Some(list_type) = self.is_list_start(line) {
+                let (list, lines_consumed) = self.parse_list(&lines[i..], list_type);
+                blocks.push(list);
+                i += lines_consumed;
+            }
             // Try to parse fenced code block (before indented code block)
             else if let Some((fence_char, fence_len, indent)) = self.is_fenced_code_start(line) {
                 let (code_block, lines_consumed) =
@@ -536,6 +542,157 @@ impl Parser {
         }
 
         Some((level, 2)) // Consume 2 lines (content + underline)
+    }
+
+    /// Check if a line starts a list (unordered or ordered)
+    /// Returns Some(ListType) if it's a list marker
+    fn is_list_start(&self, line: &str) -> Option<ListType> {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+
+        // Max 3 spaces of indentation for list marker
+        if indent > 3 {
+            return None;
+        }
+
+        // Check for unordered list marker: -, +, *
+        if let Some(first_char) = trimmed.chars().next()
+            && (first_char == '-' || first_char == '+' || first_char == '*')
+        {
+            // Must be followed by space or end of line
+            if trimmed.len() == 1
+                || trimmed.chars().nth(1) == Some(' ')
+                || trimmed.chars().nth(1) == Some('\t')
+            {
+                return Some(ListType::Unordered(first_char));
+            }
+        }
+
+        // Check for ordered list marker: digit(s) followed by . or )
+        let mut digit_count = 0;
+        let mut chars = trimmed.chars();
+        while let Some(ch) = chars.next() {
+            if ch.is_ascii_digit() {
+                digit_count += 1;
+                if digit_count > 9 {
+                    // Max 9 digits
+                    return None;
+                }
+            } else if (ch == '.' || ch == ')') && digit_count > 0 {
+                // Must be followed by space or end of line
+                if let Some(next) = chars.next() {
+                    if next == ' ' || next == '\t' {
+                        let num_str = &trimmed[0..digit_count];
+                        if let Ok(start) = num_str.parse::<u32>() {
+                            return Some(ListType::Ordered(start, ch));
+                        }
+                    }
+                } else {
+                    // End of line after marker
+                    let num_str = &trimmed[0..digit_count];
+                    if let Ok(start) = num_str.parse::<u32>() {
+                        return Some(ListType::Ordered(start, ch));
+                    }
+                }
+                return None;
+            } else {
+                break;
+            }
+        }
+
+        None
+    }
+
+    /// Parse a list (collecting consecutive items with same marker type)
+    fn parse_list(&self, lines: &[&str], list_type: ListType) -> (Node, usize) {
+        let mut items = Vec::new();
+        let mut i = 0;
+
+        while i < lines.len() {
+            // Check if current line is a list item of the same type
+            if let Some(current_type) = self.is_list_start(lines[i]) {
+                if !list_type.is_compatible(&current_type) {
+                    // Different list type, stop this list
+                    break;
+                }
+
+                // Parse this list item (simple version: just the first line)
+                let (item, consumed) = self.parse_list_item(&lines[i..], &current_type);
+                items.push(item);
+                i += consumed;
+            } else if i > 0 && lines[i].trim().is_empty() {
+                // Blank line - might continue or end the list
+                // For now, end the list on blank line (simplified)
+                break;
+            } else {
+                // Not a list item, stop
+                break;
+            }
+        }
+
+        // Create the appropriate list node
+        let list_node = match list_type {
+            ListType::Unordered(_) => Node::UnorderedList(items),
+            ListType::Ordered(start, _) => Node::OrderedList {
+                start,
+                children: items,
+            },
+        };
+
+        (list_node, i)
+    }
+
+    /// Parse a single list item (simplified: just first line)
+    fn parse_list_item(&self, lines: &[&str], list_type: &ListType) -> (Node, usize) {
+        let line = lines[0];
+
+        // Extract the content after the marker
+        let content = self.extract_list_item_content(line, list_type);
+
+        // Create a simple list item with text content
+        let item = Node::ListItem(vec![Node::Text(content)]);
+
+        (item, 1) // Consume 1 line for now
+    }
+
+    /// Extract the content after a list marker
+    fn extract_list_item_content(&self, line: &str, list_type: &ListType) -> String {
+        let trimmed = line.trim_start();
+
+        match list_type {
+            ListType::Unordered(_) => {
+                // Skip the marker character and following spaces
+                let after_marker = &trimmed[1..].trim_start();
+                after_marker.to_string()
+            }
+            ListType::Ordered(_, delimiter) => {
+                // Find the delimiter position
+                if let Some(pos) = trimmed.find(*delimiter) {
+                    let after_marker = &trimmed[pos + 1..].trim_start();
+                    after_marker.to_string()
+                } else {
+                    String::new()
+                }
+            }
+        }
+    }
+}
+
+/// List type identifier
+#[derive(Debug, Clone, PartialEq)]
+enum ListType {
+    Unordered(char),    // The marker character (-, +, *)
+    Ordered(u32, char), // Start number and delimiter (. or ))
+}
+
+impl ListType {
+    /// Check if two list types are compatible (can be in the same list)
+    fn is_compatible(&self, other: &ListType) -> bool {
+        match (self, other) {
+            (ListType::Unordered(a), ListType::Unordered(b)) => a == b,
+            (ListType::Ordered(_, a), ListType::Ordered(_, b)) => a == b,
+            _ => false,
+        }
     }
 }
 

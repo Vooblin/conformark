@@ -3,9 +3,10 @@
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (26.4% baseline - 173/655 tests)
+1. Run `cargo test -- --nocapture` to see current coverage (29.6% baseline - 194/655 tests)
 2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
-3. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules
+3. Count tests in a section: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
+4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules
 
 **To add a feature:**
 1. Add `Node` variant to `src/ast.rs` (e.g., `BlockQuote(Vec<Node>)`)
@@ -23,7 +24,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (**26.4% coverage** - 173/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
+**Current Status**: Test harness complete (**29.6% coverage** - 194/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
 
 ## Architecture & Design Goals
 
@@ -35,11 +36,16 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
    - ✅ Fenced code blocks (``` or ~~~ with 3+ chars, info strings, proper closing)
    - ✅ Indented code blocks (4+ space indentation, blank line handling)
    - ✅ Block quotes (`>` prefix, recursive parsing)
+   - ✅ Basic lists (unordered `-`, `+`, `*` and ordered `1.`, `2)` markers, flat structure only)
    - ✅ Basic paragraphs (non-empty, non-heading lines)
-   - ⏳ Two-phase parsing architecture needed:
-     - Phase 1: Block structure (lists)
-     - Phase 2: Inline elements (emphasis, links, code spans, images)
-2. **AST** (`src/ast.rs`): `Node` enum with 6 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `Text`. Expand incrementally as features are added.
+   - ⏳ Advanced list features needed:
+     - Multi-line list items with continuation
+     - Nested lists
+     - List item containing multiple block elements (paragraphs, code blocks, etc.)
+     - Tight vs loose list detection
+   - ⏳ Inline parsing (Phase 2):
+     - Emphasis, links, code spans, images
+2. **AST** (`src/ast.rs`): `Node` enum with 9 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`. Expand incrementally as features are added.
 3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
 5. **Streaming API**: Not yet implemented.
@@ -58,7 +64,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 # Build project (Rust 2024 edition)
 cargo build --verbose
 
-# Run all tests including 655 spec tests (currently 173 passing, 26.4% coverage)
+# Run all tests including 655 spec tests (currently 194 passing, 29.6% coverage)
 cargo test --verbose
 
 # See detailed test output with pass/fail stats
@@ -83,9 +89,22 @@ cargo doc --no-deps --verbose
 
 ### TDD Workflow (Critical)
 1. **Find relevant tests**: Search `tests/data/tests.json` by section (e.g., "Tabs", "Headings", "Lists")
+   ```bash
+   # List all sections
+   jq -r '.[].section' tests/data/tests.json | sort -u
+   
+   # Get all tests for a section
+   jq '.[] | select(.section == "ATX headings")' tests/data/tests.json
+   
+   # Count tests per section
+   jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn
+   
+   # Find failing test by example number
+   jq '.[] | select(.example == 123)' tests/data/tests.json
+   ```
 2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
 3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 26.4%)
+4. **Track progress**: Coverage % increases as features are added (currently 29.6%)
 5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
 
 ### Dependencies
@@ -101,7 +120,7 @@ Use latest stable features. Check for breaking changes when they arise.
 
 ### Testing Strategy
 1. **Spec compliance first**: Every parser/renderer feature must pass corresponding CommonMark tests
-2. **Non-failing tests**: `tests/spec_tests.rs` currently doesn't fail CI (tracking mode). Will become strict once implementation progresses.
+2. **Non-failing tests**: `tests/spec_tests.rs` currently doesn't fail CI (tracking mode). This is intentional during incremental development - the test reports pass/fail statistics but doesn't block the build. Will become strict once core features are complete.
 3. **Incremental validation**: After each feature, run `cargo test -- --nocapture` to see new passing tests
 4. **Reference test structure** (`tests/data/tests.json`):
    ```json
@@ -114,6 +133,7 @@ Use latest stable features. Check for breaking changes when they arise.
      "section": "Tabs"
    }
    ```
+5. **Test output format**: First 5 failures show detailed diffs (input, expected, actual), then summary statistics
 
 ### Current Implementation Patterns
 
@@ -183,6 +203,29 @@ Use latest stable features. Check for breaking changes when they arise.
    - `CodeBlock` → `<pre><code class="language-{info}">...</code></pre>\n` (class only if info is non-empty)
    - `ThematicBreak` → `<hr />\n`
    - `BlockQuote` → `<blockquote>\n...\n</blockquote>\n`
+   - `UnorderedList` → `<ul>\n...\n</ul>\n`
+   - `OrderedList` → `<ol start="{start}">\n...\n</ol>\n` (start attribute only if not 1)
+   - `ListItem` → `<li>...</li>\n` (simple) or `<li>\n...\n</li>\n` (with block elements)
+
+7. **List Parsing Pattern** (`src/parser.rs`): Uses helper enum and methods
+   ```rust
+   enum ListType {
+       Unordered(char),    // -, +, *
+       Ordered(u32, char), // start number and delimiter (. or ))
+   }
+   
+   fn is_list_start(&self, line: &str) -> Option<ListType> {
+       // Detects list markers with ≤3 spaces indent
+       // Must have space after marker
+   }
+   
+   fn parse_list(&self, lines: &[&str], list_type: ListType) -> (Node, usize) {
+       // Collects consecutive items with compatible markers
+       // Different markers split into separate lists
+   }
+   ```
+   - Currently implements flat lists only (single-line items)
+   - Future: multi-line items, nesting, tight/loose detection
 
 ### CommonMark Parsing Strategy (from spec)
 **Two-phase parsing** is mandatory:
@@ -293,6 +336,33 @@ src/
 3. **HTML block types**: 7 distinct start conditions, different end conditions
 4. **Link reference matching**: Case-insensitive, normalize whitespace
 5. **Emphasis precedence**: Code spans and HTML tags take precedence over emphasis
+
+## Troubleshooting
+
+### Tests failing after changes
+```bash
+# Run with output to see which tests are failing
+cargo test -- --nocapture
+
+# Check specific section's tests
+jq '.[] | select(.section == "ATX headings")' tests/data/tests.json | jq -s '.[0:3]'
+
+# Verify formatting and linting
+cargo fmt && cargo clippy --all-targets --all-features
+```
+
+### Understanding test failures
+Test output shows:
+- Example number (cross-reference with `tests/data/tests.json`)
+- Section name (e.g., "Tabs", "Block quotes")
+- Input markdown, expected HTML, actual HTML
+- First 5 failures are detailed, then summary
+
+### Rust 2024 Edition Issues
+Edition 2024 is new (2024 stable release). If you encounter edition-related errors:
+- Check Rust version: `rustc --version` (should be 1.85+)
+- Update toolchain: `rustup update stable`
+- Reference: https://doc.rust-lang.org/edition-guide/rust-2024/
 
 ## When Making Changes
 

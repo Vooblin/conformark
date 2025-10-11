@@ -46,6 +46,34 @@ fn render_node(node: &Node) -> String {
             let content: String = children.iter().map(render_node).collect();
             format!("<blockquote>\n{}</blockquote>\n", content)
         }
+        Node::UnorderedList(children) => {
+            let content: String = children.iter().map(render_node).collect();
+            format!("<ul>\n{}</ul>\n", content)
+        }
+        Node::OrderedList { start, children } => {
+            let content: String = children.iter().map(render_node).collect();
+            if *start == 1 {
+                format!("<ol>\n{}</ol>\n", content)
+            } else {
+                format!("<ol start=\"{}\">\n{}</ol>\n", start, content)
+            }
+        }
+        Node::ListItem(children) => {
+            let content: String = children.iter().map(render_node).collect();
+            // Check if content has block-level elements (contains newlines from nested blocks)
+            if content.contains("</p>")
+                || content.contains("</blockquote>")
+                || content.contains("</pre>")
+                || content.contains("</ul>")
+                || content.contains("</ol>")
+            {
+                format!("<li>\n{}</li>\n", content)
+            } else {
+                // Simple content - no wrapping paragraph, trim trailing newline from Text
+                let trimmed = content.trim_end_matches('\n');
+                format!("<li>{}</li>\n", trimmed)
+            }
+        }
         Node::Text(text) => escape_html(text),
     }
 }
