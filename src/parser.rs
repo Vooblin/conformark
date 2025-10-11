@@ -672,13 +672,29 @@ impl Parser {
                     break;
                 }
 
-                // Parse this list item (simple version: just the first line)
+                // Parse this list item (multi-line support)
                 let (item, consumed) = self.parse_list_item(&lines[i..], &current_type);
                 items.push(item);
                 i += consumed;
             } else if i > 0 && lines[i].trim().is_empty() {
                 // Blank line - might continue or end the list
-                // For now, end the list on blank line (simplified)
+                // Look ahead to see if there's a continuation
+                let mut j = i + 1;
+                while j < lines.len() && lines[j].trim().is_empty() {
+                    j += 1;
+                }
+
+                // Check if next non-blank line continues the list
+                if j < lines.len()
+                    && let Some(next_type) = self.is_list_start(lines[j])
+                    && list_type.is_compatible(&next_type)
+                {
+                    // Continue to next list item
+                    i = j;
+                    continue;
+                }
+
+                // No more list items, stop
                 break;
             } else {
                 // Not a list item, stop
@@ -698,17 +714,139 @@ impl Parser {
         (list_node, i)
     }
 
-    /// Parse a single list item (simplified: just first line)
+    /// Parse a single list item with multi-line support
     fn parse_list_item(&self, lines: &[&str], list_type: &ListType) -> (Node, usize) {
-        let line = lines[0];
+        let first_line = lines[0];
 
-        // Extract the content after the marker
-        let content = self.extract_list_item_content(line, list_type);
+        // Calculate the content indent (W + N)
+        // W = marker width, N = spaces after marker (1-4)
+        let content_indent = self.calculate_list_item_indent(first_line, list_type);
 
-        // Create a simple list item with text content
-        let item = Node::ListItem(vec![Node::Text(content)]);
+        // Collect all lines belonging to this list item
+        let mut item_lines = Vec::new();
 
-        (item, 1) // Consume 1 line for now
+        // Add first line content
+        let first_content = self.extract_list_item_content(first_line, list_type);
+        if !first_content.is_empty() {
+            item_lines.push(first_content);
+        }
+
+        let mut i = 1;
+        let mut has_blank = false;
+
+        while i < lines.len() {
+            let line = lines[i];
+
+            // Check if this is a new list item
+            if self.is_list_start(line).is_some() {
+                break;
+            }
+
+            // Blank line
+            if line.trim().is_empty() {
+                has_blank = true;
+                item_lines.push(String::new());
+                i += 1;
+                continue;
+            }
+
+            // Check indentation to see if line belongs to this item
+            let line_indent = self.count_indent_columns(line);
+
+            if line_indent >= content_indent {
+                // Remove the item indentation and add to item
+                let dedented = self.remove_indent(line, content_indent);
+                item_lines.push(dedented);
+                i += 1;
+            } else {
+                // Not enough indentation, stop item
+                break;
+            }
+        }
+
+        // Parse the collected lines as blocks
+        let item_content = item_lines.join("\n");
+        let parsed = self.parse(&item_content);
+
+        // Extract children from the parsed document
+        let children = match parsed {
+            Node::Document(children) => children,
+            other => vec![other],
+        };
+
+        // Determine if this is a "loose" list item (contains blank lines between blocks)
+        // For now, if we have blank lines and multiple blocks, wrap in <p> tags
+        let final_children = if has_blank && children.len() > 1 {
+            // Wrap non-paragraph blocks in paragraphs if needed
+            children
+        } else if has_blank && children.len() == 1 {
+            // Single block with blank lines - wrap in paragraph
+            match &children[0] {
+                Node::Paragraph(_) => children,
+                _ => children, // Already in proper format
+            }
+        } else {
+            children
+        };
+
+        let item = Node::ListItem(final_children);
+        (item, i)
+    }
+
+    /// Calculate the required indent for list item continuation
+    /// W (marker width) + N (spaces after marker, 1-4)
+    fn calculate_list_item_indent(&self, line: &str, list_type: &ListType) -> usize {
+        let trimmed = line.trim_start();
+        let initial_indent = self.count_indent_columns(&line[..line.len() - trimmed.len()]);
+
+        match list_type {
+            ListType::Unordered(_) => {
+                // Marker is 1 char, find spaces after
+                let after_marker = &trimmed[1..];
+                let spaces = after_marker.len() - after_marker.trim_start().len();
+                let spaces = spaces.clamp(1, 4); // 1-4 spaces
+                initial_indent + 1 + spaces
+            }
+            ListType::Ordered(_, delimiter) => {
+                // Find delimiter position to get marker width
+                if let Some(pos) = trimmed.find(*delimiter) {
+                    let marker_width = pos + 1;
+                    let after_marker = &trimmed[marker_width..];
+                    let spaces = after_marker.len() - after_marker.trim_start().len();
+                    let spaces = spaces.clamp(1, 4); // 1-4 spaces
+                    initial_indent + marker_width + spaces
+                } else {
+                    initial_indent + 2 // Fallback
+                }
+            }
+        }
+    }
+
+    /// Remove a specific amount of indentation from a line
+    fn remove_indent(&self, line: &str, cols: usize) -> String {
+        let mut removed = 0;
+        let mut pos = 0;
+
+        for ch in line.chars() {
+            if removed >= cols {
+                break;
+            }
+
+            match ch {
+                ' ' => {
+                    removed += 1;
+                    pos += 1;
+                }
+                '\t' => {
+                    let next_tab_stop = (removed / 4 + 1) * 4;
+                    removed = next_tab_stop;
+                    pos += 1;
+                }
+                _ => break,
+            }
+        }
+
+        line[pos..].to_string()
     }
 
     /// Extract the content after a list marker
