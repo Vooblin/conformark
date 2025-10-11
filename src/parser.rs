@@ -87,7 +87,11 @@ impl Parser {
             // Try to parse Setext heading (check if next line is underline)
             else if i + 1 < lines.len() {
                 if let Some((level, lines_consumed)) = self.parse_setext_heading(&lines[i..]) {
-                    let children = self.parse_inline(lines[i].trim());
+                    // Join all content lines (all except the last which is the underline)
+                    let content_lines = &lines[i..i + lines_consumed - 1];
+                    let trimmed: Vec<&str> = content_lines.iter().map(|line| line.trim()).collect();
+                    let text = trimmed.join("\n");
+                    let children = self.parse_inline(&text);
                     blocks.push(Node::Heading { level, children });
                     i += lines_consumed;
                 } else {
@@ -897,13 +901,57 @@ impl Parser {
             return None;
         }
 
-        // Check if we have at least one more line
-        if lines.len() < 2 {
-            return None;
+        // Look ahead to find a setext underline
+        // We need to simulate paragraph parsing to find where it would end with an underline
+        let mut content_lines = 0;
+        for (idx, &line) in lines.iter().enumerate() {
+            if idx == 0 {
+                content_lines = 1;
+                continue;
+            }
+
+            // Check if this is a setext underline
+            if let Some((level, _)) = self.is_setext_underline(line) {
+                // Found an underline after content - this is a setext heading
+                return Some((level, idx + 1)); // idx lines of content + 1 underline
+            }
+
+            // Check if this line would interrupt the paragraph
+            // If so, there's no setext heading here
+            if line.trim().is_empty() {
+                // Blank line ends paragraph without heading
+                return None;
+            }
+            if self.is_thematic_break(line) {
+                return None;
+            }
+            if self.parse_atx_heading(line).is_some() {
+                return None;
+            }
+            if self.is_fenced_code_start(line).is_some() {
+                return None;
+            }
+            if idx == 1 && self.is_indented_code_line(line) {
+                // Indented code on second line interrupts
+                return None;
+            }
+            if self.is_blockquote_start(line) {
+                return None;
+            }
+            if self.is_list_start(line).is_some() {
+                return None;
+            }
+
+            // This line is part of the potential heading content
+            content_lines += 1;
+
+            // Don't look too far ahead (reasonable limit)
+            if content_lines > 20 {
+                return None;
+            }
         }
 
-        // Check if second line is a valid Setext underline
-        self.is_setext_underline(lines[1])
+        None
     }
 
     /// Check if a line is a valid Setext heading underline
@@ -1539,7 +1587,7 @@ impl Parser {
         // This means trimming each line, then joining with newlines
         let trimmed_lines: Vec<&str> = paragraph_lines
             .iter()
-            .map(|line| {
+            .map(|&line: &&str| {
                 line.trim_start_matches([' ', '\t'])
                     .trim_end_matches([' ', '\t'])
             })
