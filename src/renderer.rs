@@ -123,7 +123,7 @@ fn render_node(node: &Node) -> String {
                 )
             }
         }
-        Node::HardBreak => "<br />".to_string(),
+        Node::HardBreak => "<br />\n".to_string(),
     }
 }
 

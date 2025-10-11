@@ -63,16 +63,16 @@ impl Parser {
                     i += lines_consumed;
                 } else {
                     // Not a Setext heading, treat as paragraph
-                    let children = self.parse_inline(line);
-                    blocks.push(Node::Paragraph(children));
-                    i += 1;
+                    let (paragraph, lines_consumed) = self.parse_paragraph(&lines[i..]);
+                    blocks.push(paragraph);
+                    i += lines_consumed;
                 }
             }
             // Last line with no possibility of Setext underline
             else {
-                let children = self.parse_inline(line);
-                blocks.push(Node::Paragraph(children));
-                i += 1;
+                let (paragraph, lines_consumed) = self.parse_paragraph(&lines[i..]);
+                blocks.push(paragraph);
+                i += lines_consumed;
             }
         }
 
@@ -257,12 +257,9 @@ impl Parser {
         let info = if info_string.is_empty() {
             String::new()
         } else {
-            // Extract first word for language class
-            info_string
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .to_string()
+            // Extract first word for language class and process backslash escapes
+            let raw_info = info_string.split_whitespace().next().unwrap_or("");
+            self.process_backslash_escapes(raw_info)
         };
 
         let mut code_lines = Vec::new();
@@ -775,6 +772,68 @@ impl Default for Parser {
 }
 
 impl Parser {
+    /// Parse a paragraph by collecting consecutive non-blank lines
+    /// that don't match any other block structure
+    fn parse_paragraph(&self, lines: &[&str]) -> (Node, usize) {
+        let mut paragraph_lines = Vec::new();
+        let mut i = 0;
+
+        while i < lines.len() {
+            let line = lines[i];
+
+            // Stop on blank line
+            if line.trim().is_empty() {
+                break;
+            }
+
+            // Stop on thematic break
+            if self.is_thematic_break(line) {
+                break;
+            }
+
+            // Stop on ATX heading
+            if self.parse_atx_heading(line).is_some() {
+                break;
+            }
+
+            // Stop on fenced code block
+            if self.is_fenced_code_start(line).is_some() {
+                break;
+            }
+
+            // Stop on indented code block (4+ spaces)
+            if self.is_indented_code_line(line) {
+                break;
+            }
+
+            // Stop on blockquote
+            if self.is_blockquote_start(line) {
+                break;
+            }
+
+            // Stop on list
+            if self.is_list_start(line).is_some() {
+                break;
+            }
+
+            // Check if this could be a Setext underline (would end the paragraph)
+            if i > 0 && self.is_setext_underline(line).is_some() {
+                // This line is a Setext underline - don't include it in paragraph
+                break;
+            }
+
+            // Include this line in the paragraph
+            paragraph_lines.push(line);
+            i += 1;
+        }
+
+        // Join lines with newlines and parse inline content
+        let text = paragraph_lines.join("\n");
+        let children = self.parse_inline(&text);
+
+        (Node::Paragraph(children), i)
+    }
+
     /// Parse inline elements (code spans, emphasis, links, etc.) from text
     fn parse_inline(&self, text: &str) -> Vec<Node> {
         let mut nodes = Vec::new();
