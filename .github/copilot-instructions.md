@@ -1,5 +1,19 @@
 # Copilot Instructions for Conformark
 
+## Quick Start for AI Agents
+
+**Before writing code:**
+1. Run `cargo test -- --nocapture` to see current coverage (22.7% baseline - 149/655 tests)
+2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
+3. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules
+
+**To add a feature:**
+1. Add `Node` variant to `src/ast.rs` (e.g., `BlockQuote(Vec<Node>)`)
+2. Implement parsing in `src/parser.rs` (use `is_*` predicates, `parse_*` methods returning `(Node, usize)`)
+3. Add rendering in `src/renderer.rs` (pattern match on new node variant)
+4. Verify: `cargo test -- --nocapture` shows increased pass rate
+5. CI checks: `cargo fmt --check && cargo clippy && cargo doc`
+
 ## Project Overview
 
 Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) written in Rust. The project aims to provide:
@@ -9,7 +23,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (22.7% coverage - 149/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, thematic breaks, fenced code blocks, indented code blocks, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding incrementally via TDD.
+**Current Status**: Test harness complete (**22.7% coverage** - 149/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, thematic breaks, fenced code blocks, indented code blocks, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
 
 ## Architecture & Design Goals
 
@@ -100,6 +114,7 @@ Use latest stable features. Check for breaking changes when they arise.
    ```
 
 ### Current Implementation Patterns
+
 1. **AST Nodes** (`src/ast.rs`): Enum variants with serde derives
    ```rust
    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -108,11 +123,45 @@ Use latest stable features. Check for breaking changes when they arise.
        Paragraph(Vec<Node>),
        Heading { level: u8, children: Vec<Node> },
        CodeBlock { info: String, literal: String },
+       ThematicBreak,
        Text(String),
    }
    ```
 
-2. **HTML Escaping** (`src/renderer.rs`): Character-by-character escaping for `<`, `>`, `&`, `"`
+2. **Parser Methods** (`src/parser.rs`): Consistent naming and return patterns
+   ```rust
+   // Predicate methods check if a line matches a pattern
+   fn is_thematic_break(&self, line: &str) -> bool { ... }
+   fn is_indented_code_line(&self, line: &str) -> bool { ... }
+   fn is_fenced_code_start(&self, line: &str) -> Option<(char, usize, usize)> { ... }
+   
+   // Parse methods consume lines and return (Node, lines_consumed)
+   fn parse_atx_heading(&self, line: &str) -> Option<Node> { ... }
+   fn parse_fenced_code_block(&self, lines: &[&str], ...) -> (Node, usize) { ... }
+   fn parse_indented_code_block(&self, lines: &[&str]) -> (Node, usize) { ... }
+   ```
+
+3. **Lookahead for Blank Lines**: Indented code blocks handle blank lines with lookahead
+   ```rust
+   // Look ahead to check if blank lines are followed by more code
+   let mut j = i + 1;
+   while j < lines.len() && lines[j].trim().is_empty() {
+       j += 1;
+   }
+   if j < lines.len() && self.is_indented_code_line(lines[j]) {
+       // Include blank lines in code block
+   }
+   ```
+
+4. **Tab Handling**: Complex partial tab removal (tabs = 4 spaces to next multiple of 4)
+   ```rust
+   fn remove_code_indent(&self, line: &str) -> String {
+       // Removes up to 4 spaces of indentation
+       // Handles partial tab removal with space padding
+   }
+   ```
+
+5. **HTML Escaping** (`src/renderer.rs`): Character-by-character escaping
    ```rust
    fn escape_html(text: &str) -> String {
        text.chars().map(|c| match c {
@@ -125,11 +174,12 @@ Use latest stable features. Check for breaking changes when they arise.
    }
    ```
 
-3. **Renderer Pattern**: Recursive pattern matching on `Node` enum
+6. **Renderer Pattern**: Recursive pattern matching on `Node` enum
    - `Document` → concatenate children
-   - `Paragraph` → wrap in `<p>` tags with newline
-   - `Heading` → `<h{level}>` tags with level from 1-6
-   - `CodeBlock` → `<pre><code>` with optional `language-{info}` class
+   - `Paragraph` → `<p>...</p>\n`
+   - `Heading` → `<h{level}>...</h{level}>\n`
+   - `CodeBlock` → `<pre><code class="language-{info}">...</code></pre>\n` (class only if info is non-empty)
+   - `ThematicBreak` → `<hr />\n`
 
 ### CommonMark Parsing Strategy (from spec)
 **Two-phase parsing** is mandatory:
@@ -169,13 +219,13 @@ assets/
   spec.txt         # Official CommonMark v0.31.2 spec (9,811 lines)
 ```
 
-**Planned expansion**:
+**Planned expansion** (not yet implemented):
 ```
 src/
   parser/
     mod.rs         # Parser entry point
     block.rs       # Block-level parsing
-    inline.rs      # Inline parsing
+    inline.rs      # Inline parsing (emphasis, links, code spans)
     delimiter.rs   # Emphasis/strong delimiter runs
   ast/
     mod.rs         # AST node definitions
@@ -188,30 +238,37 @@ src/
     strikethrough.rs
 ```
 
+**Note**: Keep all files in `src/` root until code organization becomes necessary. Don't create subdirectories prematurely.
+
 ## Key Implementation Notes
 
-### HTML Entities
-- Recognized entities: 2125+ HTML5 named entities
-- Numeric entities: `&#123;` (decimal), `&#xAB;` (hex)
-- Invalid entities render literally with `&` escaped
+### Critical Parsing Details (Currently Implemented)
 
-### Link Processing
-- Normalize reference labels (case-insensitive, collapse whitespace)
-- Percent-encode URLs per spec
-- Support angle-bracket destinations: `<url>`
-- Handle balanced parentheses in URLs
+1. **Fence Detection**: Backticks or tildes, 3+ characters, max 3 spaces indentation
+   ```rust
+   fn is_fenced_code_start(&self, line: &str) -> Option<(char, usize, usize)> {
+       // Returns (fence_char, fence_length, indent)
+       // 4+ spaces = indented code block, not fenced
+   }
+   ```
 
-### Emphasis Algorithm
-- Use **delimiter run** algorithm (not greedy matching)
-- Track left/right flanking delimiters
-- `*` can open/close emphasis when flanking
-- `_` has word boundary restrictions
+2. **Closing Fence Requirements**: Same character, >= opening length, only whitespace after
+   ```rust
+   fn is_closing_fence(&self, line: &str, fence_char: char, min_fence_len: usize) -> bool
+   ```
 
-### Performance Considerations
-- Streaming API for large documents
-- Avoid backtracking in parser
-- Lazy evaluation where possible
-- Benchmark against reference implementations (cmark, pulldown-cmark)
+3. **Thematic Break Rules**: 3+ matching `-`, `_`, or `*` with optional spaces between
+   - Must have 0-3 leading spaces (4+ = code block)
+   - Can have spaces between characters
+   - All non-space chars must match
+
+### Future Features (Not Yet Implemented)
+
+- **HTML Entities**: 2125+ HTML5 named entities, numeric entities (`&#123;`, `&#xAB;`)
+- **Link Processing**: Reference label normalization, percent-encoding, balanced parens
+- **Emphasis Algorithm**: Delimiter run algorithm (not greedy), left/right flanking rules
+- **Streaming API**: For large documents
+- **Performance**: Avoid backtracking, lazy evaluation, benchmark vs cmark/pulldown-cmark
 
 ## Common Pitfalls
 
@@ -237,23 +294,49 @@ src/
 - Rust Markdown Parsers: pulldown-cmark, comrak (for comparison)
 - Test Suite: `tests/data/tests.json` (authoritative for this project)
 
-## Quick Start for AI Agents
+## Concrete Example: Adding Blockquote Support
 
-### Before Writing Code
-1. Run `cargo test -- --nocapture` to see current coverage (22.7% baseline)
-2. Search `tests/data/tests.json` for test cases related to your feature (e.g., `grep "Tabs" tests/data/tests.json`)
-3. Read relevant sections in `assets/spec.txt` for precise CommonMark rules
+1. **Find relevant tests**:
+   ```bash
+   jq '.[] | select(.section == "Block quotes")' tests/data/tests.json | head -20
+   ```
 
-### Implementation Pattern
-1. **Add AST node** in `src/ast.rs` (new `Node` variant)
-2. **Update parser** in `src/parser.rs` (currently has ATX headings + basic paragraphs - needs more block/inline logic)
-3. **Update renderer** in `src/renderer.rs` (add pattern match for new node)
-4. **Run tests**: `cargo test -- --nocapture` to see pass rate increase
-5. **Check CI requirements**: `cargo fmt --check`, `cargo clippy`, `cargo doc`
+2. **Add AST node** to `src/ast.rs`:
+   ```rust
+   pub enum Node {
+       // ... existing variants
+       BlockQuote(Vec<Node>),
+   }
+   ```
 
-### Example: Adding Blockquote Support
-1. Find blockquote tests: `jq '.[] | select(.section == "Block quotes")' tests/data/tests.json | head -20`
-2. Add `Node::BlockQuote(Vec<Node>)` to `src/ast.rs`
-3. Parse `>` prefix in `src/parser.rs`
-4. Render as `<blockquote>` in `src/renderer.rs`
-5. Verify: `cargo test -- --nocapture` shows more passing tests
+3. **Parse in `src/parser.rs`** (in the main parse loop):
+   ```rust
+   // After other block checks
+   else if line.trim_start().starts_with('>') {
+       let (blockquote, lines_consumed) = self.parse_blockquote(&lines[i..]);
+       blocks.push(blockquote);
+       i += lines_consumed;
+   }
+   ```
+   
+   Then implement the method:
+   ```rust
+   fn parse_blockquote(&self, lines: &[&str]) -> (Node, usize) {
+       // Extract lines starting with '>', parse recursively
+       // Return (Node::BlockQuote(children), lines_consumed)
+   }
+   ```
+
+4. **Render in `src/renderer.rs`**:
+   ```rust
+   Node::BlockQuote(children) => {
+       let content: String = children.iter().map(render_node).collect();
+       format!("<blockquote>\n{}</blockquote>\n", content)
+   }
+   ```
+
+5. **Verify**:
+   ```bash
+   cargo test -- --nocapture  # Watch coverage increase
+   cargo fmt && cargo clippy  # Ensure code quality
+   ```
