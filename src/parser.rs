@@ -1257,6 +1257,7 @@ impl Parser {
 
     /// Calculate the required indent for list item continuation
     /// W (marker width) + N (spaces after marker, 1-4 columns)
+    /// If there are more than 4 columns of whitespace, only 1 is consumed as spacing (per spec)
     fn calculate_list_item_indent(&self, line: &str, list_type: &ListType) -> usize {
         let trimmed = line.trim_start();
         let initial_indent = self.count_indent_columns(&line[..line.len() - trimmed.len()]);
@@ -1266,12 +1267,9 @@ impl Parser {
                 // Marker is 1 char at initial_indent, so marker ends at initial_indent + 1
                 let after_marker = &trimmed[1..];
 
-                // Count columns of whitespace after marker (min 1, max 4)
+                // Count columns of whitespace after marker
                 let mut col = 0;
                 for ch in after_marker.chars() {
-                    if col >= 4 {
-                        break;
-                    }
                     match ch {
                         ' ' => col += 1,
                         '\t' => {
@@ -1284,8 +1282,9 @@ impl Parser {
                     }
                 }
 
-                // Must have at least 1 column of whitespace
-                let spacing = col.clamp(1, 4);
+                // Per CommonMark spec: if >4 columns of whitespace, only 1 is consumed as spacing
+                // This allows indented code blocks on the first line of a list item
+                let spacing = if col > 4 { 1 } else { col.max(1) };
                 initial_indent + 1 + spacing
             }
             ListType::Ordered(_, delimiter) => {
@@ -1294,12 +1293,9 @@ impl Parser {
                     let marker_width = pos + 1;
                     let after_marker = &trimmed[marker_width..];
 
-                    // Count columns of whitespace after marker (min 1, max 4)
+                    // Count columns of whitespace after marker
                     let mut col = 0;
                     for ch in after_marker.chars() {
-                        if col >= 4 {
-                            break;
-                        }
                         match ch {
                             ' ' => col += 1,
                             '\t' => {
@@ -1311,7 +1307,8 @@ impl Parser {
                         }
                     }
 
-                    let spacing = col.clamp(1, 4);
+                    // Per CommonMark spec: if >4 columns of whitespace, only 1 is consumed
+                    let spacing = if col > 4 { 1 } else { col.max(1) };
                     initial_indent + marker_width + spacing
                 } else {
                     initial_indent + 2 // Fallback
@@ -1322,6 +1319,7 @@ impl Parser {
 
     /// Remove a specific amount of indentation from a line
     /// Handles partial tab removal by replacing with spaces
+    /// Expands any remaining tabs to spaces
     fn remove_indent(&self, line: &str, cols: usize) -> String {
         let mut removed = 0;
         let mut result = String::new();
@@ -1329,8 +1327,9 @@ impl Parser {
 
         for (idx, ch) in line.chars().enumerate() {
             if removed >= cols {
-                // We've removed enough, return the rest
-                return result + &line.chars().skip(chars_to_skip).collect::<String>();
+                // We've removed enough, expand tabs in the rest and return
+                let remainder = result + &line.chars().skip(chars_to_skip).collect::<String>();
+                return self.expand_tabs(&remainder, removed);
             }
 
             match ch {
@@ -1353,18 +1352,21 @@ impl Parser {
                     }
                 }
                 _ => {
-                    // Hit non-whitespace, stop removing
-                    return result + &line.chars().skip(chars_to_skip).collect::<String>();
+                    // Hit non-whitespace, expand tabs in the rest and return
+                    let remainder = result + &line.chars().skip(chars_to_skip).collect::<String>();
+                    return self.expand_tabs(&remainder, removed);
                 }
             }
         }
 
-        // Removed all whitespace, return remainder (empty or from partial tab)
-        result + &line.chars().skip(chars_to_skip).collect::<String>()
+        // Removed all whitespace, expand tabs in remainder and return
+        let remainder = result + &line.chars().skip(chars_to_skip).collect::<String>();
+        self.expand_tabs(&remainder, removed)
     }
 
     /// Extract the content after a list marker for the first line
-    /// Removes the marker and up to 4 columns of spacing after it
+    /// Removes the marker and spacing after it (1-4 columns)
+    /// Per spec: if >4 columns of whitespace, only 1 is consumed as spacing
     fn extract_list_item_content(&self, line: &str, list_type: &ListType) -> String {
         let trimmed = line.trim_start();
         if trimmed.is_empty() {
@@ -1388,22 +1390,42 @@ impl Parser {
 
                 let after_marker = &line[after_marker_start..];
 
-                // Now remove 1-4 columns of spacing, handling tabs correctly
+                // First, count total columns of whitespace after marker
                 let marker_col = self.count_indent_columns(&line[..leading_ws_bytes]);
                 let mut col = marker_col + 1; // After marker
+                let mut total_ws_cols = 0;
+
+                for ch in after_marker.chars() {
+                    match ch {
+                        ' ' => total_ws_cols += 1,
+                        '\t' => {
+                            let next_tab_stop = ((col + total_ws_cols) / 4 + 1) * 4;
+                            total_ws_cols += next_tab_stop - (col + total_ws_cols);
+                        }
+                        _ => break,
+                    }
+                }
+
+                // Must have at least 1 column of whitespace
+                if total_ws_cols == 0 {
+                    return String::new();
+                }
+
+                // Determine how many columns to remove as spacing
+                let spacing_to_remove = if total_ws_cols > 4 { 1 } else { total_ws_cols };
+
+                // Now remove that many columns, handling partial tabs
                 let mut removed = 0;
                 let mut result = String::new();
                 let mut chars_to_skip = 0;
 
                 for (idx, ch) in after_marker.chars().enumerate() {
-                    if removed >= 4 {
-                        // Max spacing removed
-                        return after_marker.chars().skip(chars_to_skip).collect();
+                    if removed >= spacing_to_remove {
+                        break;
                     }
 
                     match ch {
                         ' ' => {
-                            col += 1;
                             removed += 1;
                             chars_to_skip = idx + 1;
                         }
@@ -1411,38 +1433,31 @@ impl Parser {
                             let next_tab_stop = (col / 4 + 1) * 4;
                             let tab_cols = next_tab_stop - col;
 
-                            if removed + tab_cols <= 4 {
+                            if removed + tab_cols <= spacing_to_remove {
                                 // Whole tab fits in spacing
                                 col = next_tab_stop;
                                 removed += tab_cols;
                                 chars_to_skip = idx + 1;
                             } else {
                                 // Partial tab - replace with spaces
-                                let cols_to_remove = 4 - removed;
+                                let cols_to_remove = spacing_to_remove - removed;
                                 let cols_to_keep = tab_cols - cols_to_remove;
                                 result = " ".repeat(cols_to_keep);
                                 chars_to_skip = idx + 1;
-                                removed = 4;
+                                removed = spacing_to_remove;
                             }
                         }
-                        _ => {
-                            // Hit content
-                            if removed == 0 {
-                                // No spacing after marker - invalid
-                                return String::new();
-                            }
-                            return result
-                                + &after_marker.chars().skip(chars_to_skip).collect::<String>();
-                        }
+                        _ => break,
                     }
                 }
 
-                // All whitespace, need at least 1 space after marker
-                if removed == 0 {
-                    return String::new();
-                }
+                let content =
+                    result + &after_marker.chars().skip(chars_to_skip).collect::<String>();
 
-                result + &after_marker.chars().skip(chars_to_skip).collect::<String>()
+                // Expand any remaining tabs in the content
+                // Content starts at column marker_col + spacing_to_remove
+                let content_col = marker_col + 1 + removed;
+                self.expand_tabs(&content, content_col)
             }
             ListType::Ordered(_, delimiter) => {
                 // Find delimiter
@@ -1455,19 +1470,42 @@ impl Parser {
                     let after_marker = &line[marker_end..];
                     let marker_col =
                         self.count_indent_columns(&line[..leading_ws_bytes]) + delim_pos + 1;
+
+                    // First, count total columns of whitespace
                     let mut col = marker_col;
+                    let mut total_ws_cols = 0;
+
+                    for ch in after_marker.chars() {
+                        match ch {
+                            ' ' => total_ws_cols += 1,
+                            '\t' => {
+                                let next_tab_stop = ((col + total_ws_cols) / 4 + 1) * 4;
+                                total_ws_cols += next_tab_stop - (col + total_ws_cols);
+                            }
+                            _ => break,
+                        }
+                    }
+
+                    // Must have at least 1 column of whitespace
+                    if total_ws_cols == 0 {
+                        return String::new();
+                    }
+
+                    // Determine how many columns to remove as spacing
+                    let spacing_to_remove = if total_ws_cols > 4 { 1 } else { total_ws_cols };
+
+                    // Now remove that many columns
                     let mut removed = 0;
                     let mut result = String::new();
                     let mut chars_to_skip = 0;
 
                     for (idx, ch) in after_marker.chars().enumerate() {
-                        if removed >= 4 {
-                            return after_marker.chars().skip(chars_to_skip).collect();
+                        if removed >= spacing_to_remove {
+                            break;
                         }
 
                         match ch {
                             ' ' => {
-                                col += 1;
                                 removed += 1;
                                 chars_to_skip = idx + 1;
                             }
@@ -1475,36 +1513,28 @@ impl Parser {
                                 let next_tab_stop = (col / 4 + 1) * 4;
                                 let tab_cols = next_tab_stop - col;
 
-                                if removed + tab_cols <= 4 {
+                                if removed + tab_cols <= spacing_to_remove {
                                     col = next_tab_stop;
                                     removed += tab_cols;
                                     chars_to_skip = idx + 1;
                                 } else {
-                                    let cols_to_remove = 4 - removed;
+                                    let cols_to_remove = spacing_to_remove - removed;
                                     let cols_to_keep = tab_cols - cols_to_remove;
                                     result = " ".repeat(cols_to_keep);
                                     chars_to_skip = idx + 1;
-                                    removed = 4;
+                                    removed = spacing_to_remove;
                                 }
                             }
-                            _ => {
-                                if removed == 0 {
-                                    return String::new();
-                                }
-                                return result
-                                    + &after_marker
-                                        .chars()
-                                        .skip(chars_to_skip)
-                                        .collect::<String>();
-                            }
+                            _ => break,
                         }
                     }
 
-                    if removed == 0 {
-                        return String::new();
-                    }
+                    let content =
+                        result + &after_marker.chars().skip(chars_to_skip).collect::<String>();
 
-                    result + &after_marker.chars().skip(chars_to_skip).collect::<String>()
+                    // Expand any remaining tabs in the content
+                    let content_col = marker_col + removed;
+                    self.expand_tabs(&content, content_col)
                 } else {
                     String::new()
                 }
