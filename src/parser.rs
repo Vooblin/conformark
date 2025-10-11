@@ -1010,6 +1010,15 @@ impl Parser {
                 continue;
             }
 
+            // Try to parse autolink (before regular links)
+            if chars[i] == '<'
+                && let Some((autolink_node, new_i)) = self.try_parse_autolink(&chars, i)
+            {
+                nodes.push(autolink_node);
+                i = new_i;
+                continue;
+            }
+
             // Try to parse image (before link, since images start with ![)
             if chars[i] == '!'
                 && i + 1 < chars.len()
@@ -1048,6 +1057,7 @@ impl Parser {
                 && chars[i] != '_'
                 && chars[i] != '['
                 && chars[i] != '!'
+                && chars[i] != '<'
             {
                 i += 1;
             }
@@ -1580,5 +1590,186 @@ impl Parser {
             },
             i,
         ))
+    }
+
+    fn try_parse_autolink(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
+        // Autolinks: <URI> or <email>
+        // Start at '<'
+        let mut i = start + 1;
+
+        // Collect content until '>' or newline
+        let content_start = i;
+        while i < chars.len() && chars[i] != '>' && chars[i] != '\n' && chars[i] != '<' {
+            i += 1;
+        }
+
+        // Must end with '>'
+        if i >= chars.len() || chars[i] != '>' {
+            return None;
+        }
+
+        let content: String = chars[content_start..i].iter().collect();
+
+        // Cannot contain spaces
+        if content.contains(char::is_whitespace) {
+            return None;
+        }
+
+        // Cannot be empty
+        if content.is_empty() {
+            return None;
+        }
+
+        i += 1; // Move past '>'
+
+        // Check if it's an email autolink
+        if content.contains('@') && self.is_email_address(&content) {
+            let destination = format!("mailto:{}", content);
+            return Some((
+                Node::Link {
+                    destination,
+                    title: None,
+                    children: vec![Node::Text(content)],
+                },
+                i,
+            ));
+        }
+
+        // Check if it's a URI autolink
+        if self.is_absolute_uri(&content) {
+            // URL-encode backslashes and other special chars in the destination
+            let destination = self.url_encode_autolink(&content);
+            return Some((
+                Node::Link {
+                    destination,
+                    title: None,
+                    children: vec![Node::Text(content)],
+                },
+                i,
+            ));
+        }
+
+        // Not a valid autolink
+        None
+    }
+
+    fn is_absolute_uri(&self, text: &str) -> bool {
+        // Must have scheme:path format
+        // Scheme: 2-32 chars, starts with letter, followed by letters/digits/+/./-
+        if let Some(colon_pos) = text.find(':') {
+            let scheme = &text[..colon_pos];
+
+            // Check scheme length
+            if scheme.len() < 2 || scheme.len() > 32 {
+                return false;
+            }
+
+            // Check first char is letter
+            if let Some(first) = scheme.chars().next() {
+                if !first.is_ascii_alphabetic() {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+
+            // Check all chars are valid
+            for ch in scheme.chars() {
+                if !ch.is_ascii_alphanumeric() && ch != '+' && ch != '.' && ch != '-' {
+                    return false;
+                }
+            }
+
+            // Must have something after colon
+            if colon_pos + 1 >= text.len() {
+                return false;
+            }
+
+            return true;
+        }
+
+        false
+    }
+
+    fn is_email_address(&self, text: &str) -> bool {
+        // Simplified email validation based on HTML5 spec
+        // Format: local@domain
+        if let Some(at_pos) = text.find('@') {
+            let local = &text[..at_pos];
+            let domain = &text[at_pos + 1..];
+
+            // Local part must be non-empty and match allowed chars
+            if local.is_empty() {
+                return false;
+            }
+
+            for ch in local.chars() {
+                if !ch.is_ascii_alphanumeric()
+                    && !matches!(
+                        ch,
+                        '.' | '!'
+                            | '#'
+                            | '$'
+                            | '%'
+                            | '&'
+                            | '\''
+                            | '*'
+                            | '+'
+                            | '/'
+                            | '='
+                            | '?'
+                            | '^'
+                            | '_'
+                            | '`'
+                            | '{'
+                            | '|'
+                            | '}'
+                            | '~'
+                            | '-'
+                    )
+                {
+                    return false;
+                }
+            }
+
+            // Domain must be non-empty and valid
+            if domain.is_empty() {
+                return false;
+            }
+
+            // Check domain format (basic validation)
+            let parts: Vec<&str> = domain.split('.').collect();
+            for part in parts {
+                if part.is_empty() {
+                    return false;
+                }
+                // First and last char of each part must be alphanumeric
+                if let Some(first) = part.chars().next()
+                    && !first.is_ascii_alphanumeric()
+                {
+                    return false;
+                }
+                if let Some(last) = part.chars().last()
+                    && !last.is_ascii_alphanumeric()
+                {
+                    return false;
+                }
+                // Middle chars can be alphanumeric or hyphen
+                for ch in part.chars() {
+                    if !ch.is_ascii_alphanumeric() && ch != '-' {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        false
+    }
+
+    fn url_encode_autolink(&self, text: &str) -> String {
+        // Percent-encode backslashes as %5C (spec says backslash-escapes don't work in autolinks)
+        text.replace('\\', "%5C")
     }
 }
