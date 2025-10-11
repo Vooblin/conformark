@@ -49,7 +49,21 @@ impl Parser {
             else if line.trim().is_empty() {
                 i += 1;
             }
-            // Non-empty, non-special lines become paragraphs
+            // Try to parse Setext heading (check if next line is underline)
+            else if i + 1 < lines.len() {
+                if let Some((level, lines_consumed)) = self.parse_setext_heading(&lines[i..]) {
+                    blocks.push(Node::Heading {
+                        level,
+                        children: vec![Node::Text(lines[i].trim().to_string())],
+                    });
+                    i += lines_consumed;
+                } else {
+                    // Not a Setext heading, treat as paragraph
+                    blocks.push(Node::Paragraph(vec![Node::Text(line.to_string())]));
+                    i += 1;
+                }
+            }
+            // Last line with no possibility of Setext underline
             else {
                 blocks.push(Node::Paragraph(vec![Node::Text(line.to_string())]));
                 i += 1;
@@ -462,6 +476,80 @@ impl Parser {
         // Otherwise, can lazy continue
         true
     }
+
+    /// Parse a Setext heading (if the next line is an underline)
+    /// Returns Some((level, lines_consumed)) if successful
+    fn parse_setext_heading(&self, lines: &[&str]) -> Option<(u8, usize)> {
+        if lines.is_empty() {
+            return None;
+        }
+
+        let first_line = lines[0];
+
+        // First line must have ≤3 spaces of indentation
+        let indent = count_leading_spaces(first_line);
+        if indent >= 4 {
+            return None;
+        }
+
+        // Check if we have at least one more line
+        if lines.len() < 2 {
+            return None;
+        }
+
+        // Check if second line is a valid Setext underline
+        self.is_setext_underline(lines[1])
+    }
+
+    /// Check if a line is a valid Setext heading underline
+    /// Returns Some((level, lines_consumed)) if valid (level 1 for '=', level 2 for '-')
+    fn is_setext_underline(&self, line: &str) -> Option<(u8, usize)> {
+        // Count leading spaces (max 3)
+        let indent = count_leading_spaces(line);
+        if indent >= 4 {
+            return None;
+        }
+
+        // Get the content after indentation
+        let content = &line[indent..];
+
+        // Find first non-whitespace character
+        let first_char = content.trim_start().chars().next()?;
+
+        // Must be '=' or '-'
+        let level = match first_char {
+            '=' => 1,
+            '-' => 2,
+            _ => return None,
+        };
+
+        // All non-whitespace characters must be the same (= or -)
+        for ch in content.chars() {
+            if ch != ' ' && ch != '\t' && ch != first_char {
+                return None;
+            }
+        }
+
+        // Must have at least one underline character (not just whitespace)
+        if content.trim().is_empty() {
+            return None;
+        }
+
+        Some((level, 2)) // Consume 2 lines (content + underline)
+    }
+}
+
+/// Count leading spaces in a line (tabs count as spaces to next multiple of 4)
+fn count_leading_spaces(line: &str) -> usize {
+    let mut count = 0;
+    for ch in line.chars() {
+        match ch {
+            ' ' => count += 1,
+            '\t' => count += 4 - (count % 4),
+            _ => break,
+        }
+    }
+    count
 }
 
 impl Default for Parser {

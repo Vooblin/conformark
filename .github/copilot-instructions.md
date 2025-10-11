@@ -3,7 +3,7 @@
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (22.7% baseline - 149/655 tests)
+1. Run `cargo test -- --nocapture` to see current coverage (26.4% baseline - 173/655 tests)
 2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
 3. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules
 
@@ -23,21 +23,23 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (**22.7% coverage** - 149/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, thematic breaks, fenced code blocks, indented code blocks, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
+**Current Status**: Test harness complete (**26.4% coverage** - 173/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
 
 ## Architecture & Design Goals
 
 ### Core Components (Implementation Status)
 1. **Parser** (`src/parser.rs`): Line-by-line parser with implemented features:
    - ✅ ATX headings (1-6 `#` levels with space requirement)
+   - ✅ Setext headings (`===` for h1, `---` for h2, with ≤3 spaces indent)
    - ✅ Thematic breaks (`---`, `___`, `***` with proper spacing rules)
    - ✅ Fenced code blocks (``` or ~~~ with 3+ chars, info strings, proper closing)
    - ✅ Indented code blocks (4+ space indentation, blank line handling)
+   - ✅ Block quotes (`>` prefix, recursive parsing)
    - ✅ Basic paragraphs (non-empty, non-heading lines)
    - ⏳ Two-phase parsing architecture needed:
-     - Phase 1: Block structure (lists, blockquotes, Setext headings)
+     - Phase 1: Block structure (lists)
      - Phase 2: Inline elements (emphasis, links, code spans, images)
-2. **AST** (`src/ast.rs`): `Node` enum with 5 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `Text`. Expand incrementally as features are added.
+2. **AST** (`src/ast.rs`): `Node` enum with 6 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `Text`. Expand incrementally as features are added.
 3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
 5. **Streaming API**: Not yet implemented.
@@ -56,7 +58,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 # Build project (Rust 2024 edition)
 cargo build --verbose
 
-# Run all tests including 655 spec tests (currently 149 passing, 22.7% coverage)
+# Run all tests including 655 spec tests (currently 173 passing, 26.4% coverage)
 cargo test --verbose
 
 # See detailed test output with pass/fail stats
@@ -83,7 +85,7 @@ cargo doc --no-deps --verbose
 1. **Find relevant tests**: Search `tests/data/tests.json` by section (e.g., "Tabs", "Headings", "Lists")
 2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
 3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 22.7%)
+4. **Track progress**: Coverage % increases as features are added (currently 26.4%)
 5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
 
 ### Dependencies
@@ -180,6 +182,7 @@ Use latest stable features. Check for breaking changes when they arise.
    - `Heading` → `<h{level}>...</h{level}>\n`
    - `CodeBlock` → `<pre><code class="language-{info}">...</code></pre>\n` (class only if info is non-empty)
    - `ThematicBreak` → `<hr />\n`
+   - `BlockQuote` → `<blockquote>\n...\n</blockquote>\n`
 
 ### CommonMark Parsing Strategy (from spec)
 **Two-phase parsing** is mandatory:
@@ -205,8 +208,8 @@ Use latest stable features. Check for breaking changes when they arise.
 ```
 src/
   lib.rs           # Public API: markdown_to_html()
-  ast.rs           # Node enum (5 variants currently)
-  parser.rs        # Parser struct (ATX headings, thematic breaks, fenced code blocks, indented code blocks, paragraphs)
+  ast.rs           # Node enum (6 variants currently)
+  parser.rs        # Parser struct (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, paragraphs)
   renderer.rs      # HtmlRenderer with escape_html()
   main.rs          # Binary entry point (if needed)
 
@@ -262,6 +265,19 @@ src/
    - Can have spaces between characters
    - All non-space chars must match
 
+4. **Setext Heading Detection**: Two-line pattern with content + underline
+   ```rust
+   fn parse_setext_heading(&self, lines: &[&str]) -> Option<(u8, usize)> {
+       // First line: ≤3 spaces indent, would be paragraph otherwise
+       // Second line: only '=' (h1) or '-' (h2) chars, ≤3 spaces indent
+       // Returns (level, lines_consumed)
+   }
+   ```
+   - Underline must be all `=` (level 1) or all `-` (level 2)
+   - Trailing spaces allowed on underline
+   - Cannot have spaces between underline characters
+   - Most tests require inline parsing for full compatibility
+
 ### Future Features (Not Yet Implemented)
 
 - **HTML Entities**: 2125+ HTML5 named entities, numeric entities (`&#123;`, `&#xAB;`)
@@ -296,6 +312,8 @@ src/
 
 ## Concrete Example: Adding Blockquote Support
 
+**Note**: Blockquotes are already implemented. This example shows the pattern that was followed:
+
 1. **Find relevant tests**:
    ```bash
    jq '.[] | select(.section == "Block quotes")' tests/data/tests.json | head -20
@@ -312,7 +330,7 @@ src/
 3. **Parse in `src/parser.rs`** (in the main parse loop):
    ```rust
    // After other block checks
-   else if line.trim_start().starts_with('>') {
+   else if self.is_blockquote_start(line) {
        let (blockquote, lines_consumed) = self.parse_blockquote(&lines[i..]);
        blocks.push(blockquote);
        i += lines_consumed;
