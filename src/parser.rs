@@ -10,22 +10,139 @@ impl Parser {
 
     pub fn parse(&self, input: &str) -> Node {
         let mut blocks = Vec::new();
+        let lines: Vec<&str> = input.lines().collect();
+        let mut i = 0;
 
-        for line in input.lines() {
+        while i < lines.len() {
+            let line = lines[i];
+
             // Try to parse ATX heading first
             if let Some(heading) = self.parse_atx_heading(line) {
                 blocks.push(heading);
+                i += 1;
             }
             // Try to parse thematic break
             else if self.is_thematic_break(line) {
                 blocks.push(Node::ThematicBreak);
-            } else if !line.trim().is_empty() {
-                // Non-empty, non-heading lines become paragraphs
+                i += 1;
+            }
+            // Try to parse indented code block
+            else if self.is_indented_code_line(line) {
+                let (code_block, lines_consumed) = self.parse_indented_code_block(&lines[i..]);
+                blocks.push(code_block);
+                i += lines_consumed;
+            }
+            // Blank lines are skipped
+            else if line.trim().is_empty() {
+                i += 1;
+            }
+            // Non-empty, non-special lines become paragraphs
+            else {
                 blocks.push(Node::Paragraph(vec![Node::Text(line.to_string())]));
+                i += 1;
             }
         }
 
         Node::Document(blocks)
+    }
+
+    fn is_indented_code_line(&self, line: &str) -> bool {
+        // A line with 4+ spaces/tabs of indentation (tabs count as 4 spaces)
+        let mut indent = 0;
+        for ch in line.chars() {
+            match ch {
+                ' ' => indent += 1,
+                '\t' => indent += 4,
+                _ => break,
+            }
+        }
+        indent >= 4 && !line.trim().is_empty()
+    }
+
+    fn parse_indented_code_block(&self, lines: &[&str]) -> (Node, usize) {
+        let mut code_lines = Vec::new();
+        let mut i = 0;
+
+        // Collect consecutive indented or blank lines
+        while i < lines.len() {
+            let line = lines[i];
+
+            if self.is_indented_code_line(line) {
+                // Remove 4 spaces of indentation
+                let dedented = self.remove_code_indent(line);
+                code_lines.push(dedented);
+                i += 1;
+            } else if line.trim().is_empty() {
+                // Blank lines can be part of code block if followed by more indented lines
+                // Look ahead to see if there are more indented lines
+                let mut j = i + 1;
+                while j < lines.len() && lines[j].trim().is_empty() {
+                    j += 1;
+                }
+
+                if j < lines.len() && self.is_indented_code_line(lines[j]) {
+                    // Include blank lines
+                    for _ in i..j {
+                        code_lines.push(String::new());
+                    }
+                    i = j;
+                } else {
+                    // No more indented lines, stop
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Remove trailing blank lines
+        while code_lines.last().is_some_and(|l| l.trim().is_empty()) {
+            code_lines.pop();
+        }
+
+        let literal = code_lines.join("\n") + "\n";
+
+        (
+            Node::CodeBlock {
+                info: String::new(),
+                literal,
+            },
+            i,
+        )
+    }
+
+    fn remove_code_indent(&self, line: &str) -> String {
+        let mut remaining_indent = 4;
+        let mut result = String::new();
+        let mut chars = line.chars();
+
+        // Remove up to 4 spaces of indentation
+        while remaining_indent > 0 {
+            match chars.next() {
+                Some(' ') => remaining_indent -= 1,
+                Some('\t') => {
+                    // Tab counts as 4 spaces, but we only remove what we need
+                    if remaining_indent >= 4 {
+                        remaining_indent -= 4;
+                    } else {
+                        // Partial tab removal: add spaces for the remainder
+                        for _ in 0..(4 - remaining_indent) {
+                            result.push(' ');
+                        }
+                        remaining_indent = 0;
+                    }
+                }
+                Some(ch) => {
+                    result.push(ch);
+                    break;
+                }
+                None => break,
+            }
+        }
+
+        // Add remaining characters
+        result.extend(chars);
+        result
     }
 
     fn parse_atx_heading(&self, line: &str) -> Option<Node> {
