@@ -384,16 +384,24 @@ impl Parser {
         // Remove trailing # characters only if preceded by whitespace
         // Per CommonMark spec: "The closing sequence of #s is optional,
         // but if present must be preceded by a space"
-        if let Some(pos) = text.rfind(|c: char| c != '#') {
-            let before_hashes = &text[..=pos];
-            let trailing_hashes = &text[pos + 1..];
+        if let Some(pos) = text.rfind(|c: char| c != '#' && c != ' ' && c != '\t') {
+            // Found a non-hash, non-whitespace character
+            let before_trailing = &text[..=pos];
+            let trailing = &text[pos + 1..];
 
-            // Only strip trailing hashes if there are any AND they're preceded by space
-            if !trailing_hashes.is_empty()
-                && (before_hashes.ends_with(' ') || before_hashes.ends_with('\t'))
+            // Check if trailing part is whitespace followed by hashes (and maybe more whitespace)
+            let trailing_trimmed = trailing.trim_start();
+            if trailing_trimmed
+                .chars()
+                .all(|c| c == '#' || c == ' ' || c == '\t')
+                && trailing_trimmed.contains('#')
+                && trailing.starts_with([' ', '\t'])
             {
-                text = before_hashes.trim_end();
+                text = before_trailing.trim_end();
             }
+        } else if text.chars().all(|c| c == '#' || c == ' ' || c == '\t') {
+            // Content is only hashes and whitespace - strip everything
+            text = "";
         }
 
         let children = self.parse_inline(text);
