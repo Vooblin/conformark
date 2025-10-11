@@ -1,9 +1,15 @@
 # Copilot Instructions for Conformark
 
+## 60-Second Quick Start
+
+**TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
+
+**Critical files**: `tests/data/tests.json` (655 spec tests), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (order matters!).
+
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (39.2% baseline - 257/655 tests passing)
+1. Run `cargo test -- --nocapture` to see current coverage (42.4% baseline - 278/655 tests passing)
 2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
 3. Count tests in a section: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
 4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules (9,811 lines, 26 sections)
@@ -24,7 +30,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (**39.2% coverage** - 257/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs, basic inline parsing with emphasis/strong/code spans/inline links), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
+**Current Status**: Test harness complete (**42.4% coverage** - 278/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs, inline parsing with emphasis/strong/code spans/inline links/images), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
 
 ## Architecture & Design Goals
 
@@ -38,17 +44,17 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
    - ✅ Block quotes (`>` prefix, recursive parsing)
    - ✅ Basic lists (unordered `-`, `+`, `*` and ordered `1.`, `2)` markers, flat structure only)
    - ✅ Basic paragraphs (non-empty, non-heading lines)
-   - ✅ Basic inline parsing (emphasis `*`/`_`, strong `**`/`__`, code spans with backticks, inline links)
+   - ✅ Basic inline parsing (emphasis `*`/`_`, strong `**`/`__`, code spans with backticks, inline links, inline images)
    - ⏳ Advanced list features needed:
      - Multi-line list items with continuation
      - Nested lists
      - List item containing multiple block elements (paragraphs, code blocks, etc.)
      - Tight vs loose list detection
    - ⏳ Advanced inline parsing (Phase 2):
-     - Images
+     - Reference-style images and links
      - Full delimiter run algorithm for emphasis
      - HTML entities, autolinks
-2. **AST** (`src/ast.rs`): `Node` enum with 14 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span), `Emphasis`, `Strong`, `Link`. Expand incrementally as features are added.
+2. **AST** (`src/ast.rs`): `Node` enum with 15 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span), `Emphasis`, `Strong`, `Link`, `Image`. Expand incrementally as features are added.
 3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children. **Special handling for `ListItem`**: detects nested block elements (checks for `</p>`, `</blockquote>`, etc.) and adjusts formatting accordingly.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
 5. **Streaming API**: Not yet implemented.
@@ -67,7 +73,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 # Build project (Rust 2024 edition)
 cargo build --verbose
 
-# Run all tests including 655 spec tests (currently 257 passing, 39.2% coverage)
+# Run all tests including 655 spec tests (currently 278 passing, 42.4% coverage)
 cargo test --verbose
 
 # See detailed test output with pass/fail stats
@@ -107,7 +113,7 @@ cargo doc --no-deps --verbose
    ```
 2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
 3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 39.2%)
+4. **Track progress**: Coverage % increases as features are added (currently 42.4%)
 5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
 
 ### Dependencies
@@ -359,8 +365,7 @@ src/
 
 ### Future Features (Not Yet Implemented)
 
-- **Images**: Similar to links but with `!` prefix
-- **Reference Links**: `[text][label]` with separate `[label]: url` definitions
+- **Reference-style Links/Images**: `[text][label]` with separate `[label]: url` definitions
 - **HTML Entities**: 2125+ HTML5 named entities, numeric entities (`&#123;`, `&#xAB;`)
 - **Emphasis Algorithm**: Full delimiter run algorithm (currently simplified)
 - **Streaming API**: For large documents
@@ -377,12 +382,12 @@ src/
 ## Troubleshooting
 
 ### Common Test Failure Patterns (Current Implementation Gaps)
-The majority of current failures (398/655 tests) fall into these categories:
+The majority of current failures (377/655 tests) fall into these categories:
 1. **Tab handling in nested contexts**: Tabs within blockquotes, lists, and code blocks need proper expansion
 2. **Multi-line list items**: List items with continuation lines and nested block elements
 3. **Nested lists**: Lists within lists with proper indentation tracking
 4. **Tight vs loose lists**: Detection of blank lines between items
-5. **Advanced inline parsing**: Images, reference links, autolinks, HTML entities
+5. **Advanced inline parsing**: Reference-style images/links, autolinks, HTML entities
 6. **HTML blocks**: Seven different start/end condition types
 7. **Link reference definitions**: `[label]: url "title"` parsing and resolution
 

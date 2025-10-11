@@ -813,6 +813,17 @@ impl Parser {
                 continue;
             }
 
+            // Try to parse image (before link, since images start with ![)
+            if chars[i] == '!'
+                && i + 1 < chars.len()
+                && chars[i + 1] == '['
+                && let Some((image_node, new_i)) = self.try_parse_image(&chars, i)
+            {
+                nodes.push(image_node);
+                i = new_i;
+                continue;
+            }
+
             // Try to parse link
             if chars[i] == '['
                 && let Some((link_node, new_i)) = self.try_parse_link(&chars, i)
@@ -839,6 +850,7 @@ impl Parser {
                 && chars[i] != '*'
                 && chars[i] != '_'
                 && chars[i] != '['
+                && chars[i] != '!'
             {
                 i += 1;
             }
@@ -1221,6 +1233,153 @@ impl Parser {
                 destination,
                 title,
                 children,
+            },
+            i,
+        ))
+    }
+
+    fn try_parse_image(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
+        // Image syntax: ![alt text](destination "title")
+        // We start at '!'
+        if chars[start] != '!' || start + 1 >= chars.len() || chars[start + 1] != '[' {
+            return None;
+        }
+
+        let mut i = start + 2; // Move past '!['
+
+        // Find the closing ']' for alt text
+        let mut bracket_depth = 1;
+        let text_start = i;
+
+        while i < chars.len() {
+            if chars[i] == '[' {
+                bracket_depth += 1;
+            } else if chars[i] == ']' {
+                bracket_depth -= 1;
+                if bracket_depth == 0 {
+                    break;
+                }
+            } else if chars[i] == '\\' && i + 1 < chars.len() {
+                // Skip escaped character
+                i += 1;
+            }
+            i += 1;
+        }
+
+        if i >= chars.len() || chars[i] != ']' {
+            return None; // No closing bracket
+        }
+
+        let text_end = i;
+        i += 1; // Move past ']'
+
+        // Now we need '(' for inline image
+        if i >= chars.len() || chars[i] != '(' {
+            return None; // Not an inline image
+        }
+        i += 1; // Move past '('
+
+        // Skip whitespace
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+
+        // Parse destination (either <...> or raw)
+        let destination: String;
+        if i < chars.len() && chars[i] == '<' {
+            // Angle-bracket enclosed destination
+            i += 1;
+            let dest_start = i;
+            while i < chars.len() && chars[i] != '>' && chars[i] != '\n' {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 1; // Skip escaped character
+                }
+                i += 1;
+            }
+            if i >= chars.len() || chars[i] != '>' {
+                return None; // Unclosed angle bracket
+            }
+            let raw_dest: String = chars[dest_start..i].iter().collect();
+            destination = self.process_backslash_escapes(&raw_dest);
+            i += 1; // Move past '>'
+        } else {
+            // Raw destination (no spaces allowed unless in parens)
+            let dest_start = i;
+            let mut paren_depth = 0;
+            while i < chars.len() {
+                if chars[i] == '(' {
+                    paren_depth += 1;
+                } else if chars[i] == ')' {
+                    if paren_depth == 0 {
+                        break; // End of destination
+                    }
+                    paren_depth -= 1;
+                } else if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 1; // Skip escaped character
+                } else if chars[i].is_whitespace() {
+                    break; // Whitespace ends destination
+                }
+                i += 1;
+            }
+            let raw_dest: String = chars[dest_start..i].iter().collect();
+            destination = self.process_backslash_escapes(&raw_dest);
+
+            // Check for invalid characters in destination (spaces outside parens)
+            if destination.contains(|c: char| c.is_whitespace()) && paren_depth == 0 {
+                return None; // Invalid destination
+            }
+        }
+
+        // Skip whitespace
+        while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t') {
+            i += 1;
+        }
+
+        // Check for optional title
+        let title: Option<String>;
+        if i < chars.len() && (chars[i] == '"' || chars[i] == '\'' || chars[i] == '(') {
+            let quote_char = if chars[i] == '(' { ')' } else { chars[i] };
+            i += 1; // Move past opening quote
+            let title_start = i;
+
+            while i < chars.len() && chars[i] != quote_char {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 1; // Skip escaped character
+                }
+                i += 1;
+            }
+
+            if i >= chars.len() || chars[i] != quote_char {
+                return None; // Unclosed title
+            }
+
+            let raw_title: String = chars[title_start..i].iter().collect();
+            title = Some(self.process_backslash_escapes(&raw_title));
+            i += 1; // Move past closing quote
+
+            // Skip trailing whitespace
+            while i < chars.len() && chars[i].is_whitespace() && chars[i] != ')' {
+                i += 1;
+            }
+        } else {
+            title = None;
+        }
+
+        // Expect closing ')'
+        if i >= chars.len() || chars[i] != ')' {
+            return None;
+        }
+        i += 1; // Move past ')'
+
+        // Parse the alt text (but flatten to plain text for alt attribute)
+        let alt_text_str: String = chars[text_start..text_end].iter().collect();
+        let alt_text = self.parse_inline(&alt_text_str);
+
+        Some((
+            Node::Image {
+                destination,
+                title,
+                alt_text,
             },
             i,
         ))

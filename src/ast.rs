@@ -33,6 +33,11 @@ pub enum Node {
         title: Option<String>,
         children: Vec<Node>,
     },
+    Image {
+        destination: String,
+        title: Option<String>,
+        alt_text: Vec<Node>, // Alt text can contain inline elements
+    },
     HardBreak, // <br /> tag (backslash at end of line)
                // More node types will be added incrementally
 }
