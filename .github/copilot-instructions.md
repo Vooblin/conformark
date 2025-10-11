@@ -4,9 +4,9 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,148 lines - order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,160 lines - order matters!).
 
-**Current status**: 63.1% coverage (413/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, entity decoding in links, tab handling in lists.
+**Current status**: 67.8% coverage (444/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, entity decoding in links, tab handling in lists.
 
 ## Quick Start for AI Agents
 
@@ -30,7 +30,7 @@
 
 **Three-file core** (`src/ast.rs`, `src/parser.rs`, `src/renderer.rs`):
 - `ast.rs`: 18 `Node` enum variants with serde derives - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `parser.rs`: 3,148 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
+- `parser.rs`: 3,160 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
 - `renderer.rs`: Recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
 
 **Public API** (`src/lib.rs`): Single function `markdown_to_html(&str) -> String`
@@ -212,7 +212,7 @@ jq '.[] | select(.example == 123)' tests/data/tests.json
 src/
   lib.rs           # Public API: markdown_to_html()
   ast.rs           # Node enum (18 variants)
-  parser.rs        # Parser struct (2,970 lines)
+  parser.rs        # Parser struct (3,160 lines)
   renderer.rs      # HtmlRenderer with escape_html()
   main.rs          # Binary entry point
 
@@ -298,7 +298,7 @@ src/
 ## Common Pitfalls & Troubleshooting
 
 **Common Test Failure Patterns:**
-The majority of current failures (242/655 tests) fall into these categories:
+The majority of current failures (211/655 tests) fall into these categories:
 1. **Emphasis and strong emphasis**: Full delimiter run algorithm needed (132 tests in section)
 2. **Link edge cases**: Complex link scenarios, reference definitions, URL encoding (90 tests)
 3. **List items**: Nested lists with proper indentation tracking (48 tests)
