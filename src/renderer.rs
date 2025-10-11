@@ -42,6 +42,10 @@ fn render_node(node: &Node) -> String {
             }
         }
         Node::ThematicBreak => "<hr />\n".to_string(),
+        Node::BlockQuote(children) => {
+            let content: String = children.iter().map(render_node).collect();
+            format!("<blockquote>\n{}</blockquote>\n", content)
+        }
         Node::Text(text) => escape_html(text),
     }
 }

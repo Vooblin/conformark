@@ -9,6 +9,7 @@ pub enum Node {
     Heading { level: u8, children: Vec<Node> },
     CodeBlock { info: String, literal: String },
     ThematicBreak,
+    BlockQuote(Vec<Node>),
     // Inline nodes
     Text(String),
     // More node types will be added incrementally

@@ -26,6 +26,12 @@ impl Parser {
                 blocks.push(Node::ThematicBreak);
                 i += 1;
             }
+            // Try to parse blockquote
+            else if self.is_blockquote_start(line) {
+                let (blockquote, lines_consumed) = self.parse_blockquote(&lines[i..]);
+                blocks.push(blockquote);
+                i += lines_consumed;
+            }
             // Try to parse fenced code block (before indented code block)
             else if let Some((fence_char, fence_len, indent)) = self.is_fenced_code_start(line) {
                 let (code_block, lines_consumed) =
@@ -340,6 +346,121 @@ impl Parser {
         };
 
         chars_only.chars().all(|c| c == first_char)
+    }
+
+    /// Check if a line starts a blockquote
+    fn is_blockquote_start(&self, line: &str) -> bool {
+        // Count leading spaces (max 3 for blockquote)
+        let indent = self.count_leading_spaces(line);
+        if indent >= 4 {
+            return false; // 4+ spaces = code block
+        }
+
+        let after_indent = &line[indent..];
+        after_indent.starts_with('>')
+    }
+
+    /// Parse a blockquote starting from the current position
+    fn parse_blockquote(&self, lines: &[&str]) -> (Node, usize) {
+        let mut quote_lines = Vec::new();
+        let mut i = 0;
+
+        while i < lines.len() {
+            let line = lines[i];
+
+            // Check if this line is part of the blockquote
+            if self.is_blockquote_start(line) {
+                // Strip the blockquote marker and add to quote lines
+                let stripped = self.strip_blockquote_marker(line);
+                quote_lines.push(stripped);
+                i += 1;
+            } else if !line.trim().is_empty() {
+                // Check for lazy continuation
+                // A non-empty line without > can continue if it's not a new block structure
+                if self.can_lazy_continue(line) {
+                    quote_lines.push(line.to_string());
+                    i += 1;
+                } else {
+                    // This starts a new block, stop the blockquote
+                    break;
+                }
+            } else {
+                // Blank line - look ahead to see if blockquote continues
+                let mut j = i + 1;
+                while j < lines.len() && lines[j].trim().is_empty() {
+                    j += 1;
+                }
+
+                if j < lines.len() && self.is_blockquote_start(lines[j]) {
+                    // Blockquote continues after blank lines, include them
+                    quote_lines.extend(std::iter::repeat_n(String::new(), j - i));
+                    i = j;
+                } else {
+                    // Blockquote ends
+                    break;
+                }
+            }
+        }
+
+        // Parse the collected lines recursively
+        let content = quote_lines.join("\n");
+        let inner_ast = self.parse(&content);
+
+        // Extract children from the Document node
+        let children = match inner_ast {
+            Node::Document(children) => children,
+            _ => vec![inner_ast],
+        };
+
+        (Node::BlockQuote(children), i)
+    }
+
+    /// Strip the blockquote marker (>) and optional following space from a line
+    fn strip_blockquote_marker(&self, line: &str) -> String {
+        // Remove leading spaces (up to 3)
+        let indent = self.count_leading_spaces(line);
+        let after_indent = &line[indent..];
+
+        // Remove the > marker
+        if let Some(after_marker) = after_indent.strip_prefix('>') {
+            // Remove optional space after >
+            if let Some(stripped) = after_marker.strip_prefix(' ') {
+                stripped.to_string()
+            } else {
+                after_marker.to_string()
+            }
+        } else {
+            line.to_string()
+        }
+    }
+
+    /// Check if a line can continue a blockquote via lazy continuation
+    fn can_lazy_continue(&self, line: &str) -> bool {
+        // Lines that start new block structures cannot lazy continue
+        // Check for common block starters
+
+        // 4+ spaces = code block
+        if self.is_indented_code_line(line) {
+            return false;
+        }
+
+        // Thematic break
+        if self.is_thematic_break(line) {
+            return false;
+        }
+
+        // ATX heading
+        if self.parse_atx_heading(line).is_some() {
+            return false;
+        }
+
+        // Fenced code block
+        if self.is_fenced_code_start(line).is_some() {
+            return false;
+        }
+
+        // Otherwise, can lazy continue
+        true
     }
 }
 
