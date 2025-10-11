@@ -42,6 +42,13 @@ impl Parser {
                 blocks.push(blockquote);
                 i += lines_consumed;
             }
+            // Try to parse HTML block (before lists, since some HTML tags could look like list items)
+            else if let Some(html_block_type) = self.is_html_block_start(line) {
+                let (html_block, lines_consumed) =
+                    self.parse_html_block(&lines[i..], html_block_type);
+                blocks.push(html_block);
+                i += lines_consumed;
+            }
             // Try to parse list (unordered or ordered)
             else if let Some(list_type) = self.is_list_start(line) {
                 let (list, lines_consumed) = self.parse_list(&lines[i..], list_type);
@@ -547,6 +554,290 @@ impl Parser {
 
         // Otherwise, can lazy continue
         true
+    }
+
+    /// Check if a line starts an HTML block (returns the block type 1-7)
+    fn is_html_block_start(&self, line: &str) -> Option<u8> {
+        // HTML blocks can have up to 3 spaces of indentation
+        let indent = self.count_leading_spaces(line);
+        if indent > 3 {
+            return None;
+        }
+
+        let trimmed = line[indent..].trim_start();
+
+        // Type 1: <pre, <script, <style, <textarea (case-insensitive)
+        for tag in ["<pre", "<script", "<style", "<textarea"] {
+            if trimmed.to_lowercase().starts_with(tag) {
+                let after = &trimmed[tag.len()..];
+                if after.is_empty()
+                    || after.starts_with('>')
+                    || after.starts_with(' ')
+                    || after.starts_with('\t')
+                {
+                    return Some(1);
+                }
+            }
+        }
+
+        // Type 2: HTML comment <!--
+        if trimmed.starts_with("<!--") {
+            return Some(2);
+        }
+
+        // Type 3: Processing instruction <?
+        if trimmed.starts_with("<?") {
+            return Some(3);
+        }
+
+        // Type 4: Declaration <! followed by uppercase letter
+        if trimmed.starts_with("<!") && trimmed.len() > 2 {
+            let ch = trimmed.chars().nth(2).unwrap();
+            if ch.is_ascii_uppercase() {
+                return Some(4);
+            }
+        }
+
+        // Type 5: CDATA section <![CDATA[
+        if trimmed.starts_with("<![CDATA[") {
+            return Some(5);
+        }
+
+        // Type 6: Block-level tags
+        let block_tags = [
+            "address",
+            "article",
+            "aside",
+            "base",
+            "basefont",
+            "blockquote",
+            "body",
+            "caption",
+            "center",
+            "col",
+            "colgroup",
+            "dd",
+            "details",
+            "dialog",
+            "dir",
+            "div",
+            "dl",
+            "dt",
+            "fieldset",
+            "figcaption",
+            "figure",
+            "footer",
+            "form",
+            "frame",
+            "frameset",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "head",
+            "header",
+            "hr",
+            "html",
+            "iframe",
+            "legend",
+            "li",
+            "link",
+            "main",
+            "menu",
+            "menuitem",
+            "nav",
+            "noframes",
+            "ol",
+            "optgroup",
+            "option",
+            "p",
+            "param",
+            "search",
+            "section",
+            "summary",
+            "table",
+            "tbody",
+            "td",
+            "tfoot",
+            "th",
+            "thead",
+            "title",
+            "tr",
+            "track",
+            "ul",
+        ];
+
+        for tag in block_tags {
+            // Opening tag <tag
+            let open_pattern = format!("<{}", tag);
+            if trimmed.to_lowercase().starts_with(&open_pattern) {
+                let after = &trimmed[open_pattern.len()..];
+                if after.is_empty()
+                    || after.starts_with('>')
+                    || after.starts_with(' ')
+                    || after.starts_with('\t')
+                    || after.starts_with("/>")
+                {
+                    return Some(6);
+                }
+            }
+            // Closing tag </tag
+            let close_pattern = format!("</{}", tag);
+            if trimmed.to_lowercase().starts_with(&close_pattern) {
+                let after = &trimmed[close_pattern.len()..];
+                if after.is_empty()
+                    || after.starts_with('>')
+                    || after.starts_with(' ')
+                    || after.starts_with('\t')
+                {
+                    return Some(6);
+                }
+            }
+        }
+
+        // Type 7: Complete open or close tag on a single line
+        // This is complex - check if line contains a complete tag followed only by whitespace
+        if ((trimmed.starts_with('<') && !trimmed.starts_with("</")) || trimmed.starts_with("</"))
+            && self.is_complete_tag_line(trimmed)
+        {
+            return Some(7);
+        }
+
+        None
+    }
+
+    /// Check if a line contains a complete HTML tag followed only by whitespace
+    fn is_complete_tag_line(&self, line: &str) -> bool {
+        let trimmed = line.trim_end();
+
+        if !trimmed.starts_with('<') {
+            return false;
+        }
+
+        // Don't match autolinks - they start with < followed by scheme:
+        // Check for common URL schemes to avoid false positives
+        if trimmed.len() > 5 {
+            let after_bracket = &trimmed[1..];
+            if after_bracket.starts_with("http://")
+                || after_bracket.starts_with("https://")
+                || after_bracket.starts_with("ftp://")
+                || after_bracket.starts_with("mailto:")
+            {
+                return false;
+            }
+        }
+
+        // Check for self-closing tag /> or regular closing >
+        if trimmed.ends_with("/>") || trimmed.ends_with('>') {
+            // Must be a valid tag name between < and >
+            // Tag names start with letter and contain letters, digits, hyphens
+            let content = if trimmed.ends_with("/>") {
+                &trimmed[1..trimmed.len() - 2]
+            } else {
+                &trimmed[1..trimmed.len() - 1]
+            };
+
+            // For closing tags, skip the /
+            let tag_part = content.strip_prefix('/').unwrap_or(content);
+
+            // Extract just the tag name (before space or other attributes)
+            if let Some(first_char) = tag_part.chars().next() {
+                // Tag name must start with ASCII letter
+                if first_char.is_ascii_alphabetic() {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Parse an HTML block of the given type
+    fn parse_html_block(&self, lines: &[&str], block_type: u8) -> (Node, usize) {
+        let mut html_lines = Vec::new();
+        let mut i = 0;
+
+        // Types 6 and 7 end when followed by a blank line
+        // Types 1-5 end when they encounter their specific end condition
+
+        if block_type == 6 || block_type == 7 {
+            // Add lines until we hit a blank line
+            while i < lines.len() {
+                let line = lines[i];
+
+                if line.trim().is_empty() {
+                    // Blank line ends the block, but don't include it
+                    break;
+                }
+
+                html_lines.push(line.to_string());
+                i += 1;
+            }
+        } else {
+            // Types 1-5: add first line
+            html_lines.push(lines[0].to_string());
+
+            // Check if first line already contains end condition
+            if self.check_html_end_condition(lines[0], block_type) {
+                let content = html_lines.join("\n") + "\n";
+                return (Node::HtmlBlock(content), 1);
+            }
+
+            i += 1;
+
+            // Continue until end condition is met
+            while i < lines.len() {
+                let line = lines[i];
+                html_lines.push(line.to_string());
+
+                if self.check_html_end_condition(line, block_type) {
+                    i += 1;
+                    break;
+                }
+
+                i += 1;
+            }
+        }
+
+        let content = html_lines.join("\n") + "\n";
+        (Node::HtmlBlock(content), i)
+    }
+
+    /// Check if a line meets the end condition for an HTML block type
+    fn check_html_end_condition(&self, line: &str, block_type: u8) -> bool {
+        match block_type {
+            1 => {
+                // End: line contains </pre>, </script>, </style>, or </textarea>
+                let lower = line.to_lowercase();
+                lower.contains("</pre>")
+                    || lower.contains("</script>")
+                    || lower.contains("</style>")
+                    || lower.contains("</textarea>")
+            }
+            2 => {
+                // End: line contains -->
+                line.contains("-->")
+            }
+            3 => {
+                // End: line contains ?>
+                line.contains("?>")
+            }
+            4 => {
+                // End: line contains >
+                line.contains('>')
+            }
+            5 => {
+                // End: line contains ]]>
+                line.contains("]]>")
+            }
+            6 | 7 => {
+                // These types are handled separately in parse_html_block (blank line termination)
+                false
+            }
+            _ => false,
+        }
     }
 
     /// Parse a Setext heading (if the next line is an underline)

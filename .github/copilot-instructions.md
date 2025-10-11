@@ -4,7 +4,7 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (2,337 lines - order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (2,375 lines - order matters!).
 
 **Where to focus next**: The largest remaining test sections are "Emphasis and strong emphasis" (132 tests), "Links" (90 tests), and "List items" (48 tests). Current blockers: nested lists, HTML blocks (7 types), and full emphasis delimiter algorithm.
 
