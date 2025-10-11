@@ -26,6 +26,13 @@ impl Parser {
                 blocks.push(Node::ThematicBreak);
                 i += 1;
             }
+            // Try to parse fenced code block (before indented code block)
+            else if let Some((fence_char, fence_len, indent)) = self.is_fenced_code_start(line) {
+                let (code_block, lines_consumed) =
+                    self.parse_fenced_code_block(&lines[i..], fence_char, fence_len, indent);
+                blocks.push(code_block);
+                i += lines_consumed;
+            }
             // Try to parse indented code block
             else if self.is_indented_code_line(line) {
                 let (code_block, lines_consumed) = self.parse_indented_code_block(&lines[i..]);
@@ -143,6 +150,136 @@ impl Parser {
         // Add remaining characters
         result.extend(chars);
         result
+    }
+
+    /// Calculate the number of leading space characters in a line
+    fn count_leading_spaces(&self, line: &str) -> usize {
+        line.chars().take_while(|&c| c == ' ').count()
+    }
+
+    /// Check if a line starts a fenced code block
+    /// Returns Some((fence_char, fence_length, indent)) if it does
+    fn is_fenced_code_start(&self, line: &str) -> Option<(char, usize, usize)> {
+        // Count leading spaces (max 3 for fenced code block)
+        let indent = self.count_leading_spaces(line);
+        if indent >= 4 {
+            return None; // 4+ spaces = indented code block
+        }
+
+        let after_indent = &line[indent..];
+
+        // Check for backticks or tildes
+        let fence_char = after_indent.chars().next()?;
+        if fence_char != '`' && fence_char != '~' {
+            return None;
+        }
+
+        // Count fence characters (must be 3+)
+        let fence_len = after_indent
+            .chars()
+            .take_while(|&c| c == fence_char)
+            .count();
+        if fence_len < 3 {
+            return None;
+        }
+
+        Some((fence_char, fence_len, indent))
+    }
+
+    /// Parse a fenced code block starting from the current position
+    fn parse_fenced_code_block(
+        &self,
+        lines: &[&str],
+        fence_char: char,
+        fence_len: usize,
+        _indent: usize,
+    ) -> (Node, usize) {
+        if lines.is_empty() {
+            return (
+                Node::CodeBlock {
+                    info: String::new(),
+                    literal: String::new(),
+                },
+                0,
+            );
+        }
+
+        // Parse the info string from the opening fence line
+        let first_line = lines[0];
+        let indent = self.count_leading_spaces(first_line);
+        let after_indent = &first_line[indent..];
+        let after_fence = &after_indent[fence_len..];
+
+        // Info string is everything after the fence, trimmed
+        // But only the first word becomes the language class
+        let info_string = after_fence.trim();
+        let info = if info_string.is_empty() {
+            String::new()
+        } else {
+            // Extract first word for language class
+            info_string
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string()
+        };
+
+        let mut code_lines = Vec::new();
+        let mut i = 1; // Start after the opening fence
+
+        // Collect lines until we find a closing fence
+        while i < lines.len() {
+            let line = lines[i];
+
+            // Check if this is a closing fence
+            if self.is_closing_fence(line, fence_char, fence_len) {
+                // Found closing fence, we're done
+                i += 1; // Include the closing fence line
+                break;
+            }
+
+            // Add this line to the code block
+            code_lines.push(line.to_string());
+            i += 1;
+        }
+
+        // If we didn't find a closing fence, that's ok - treat rest as code
+        let literal = if code_lines.is_empty() {
+            String::new()
+        } else {
+            code_lines.join("\n") + "\n"
+        };
+
+        (Node::CodeBlock { info, literal }, i)
+    }
+
+    /// Check if a line is a valid closing fence
+    fn is_closing_fence(&self, line: &str, fence_char: char, min_fence_len: usize) -> bool {
+        // Can have leading spaces (0-3)
+        let indent = self.count_leading_spaces(line);
+        if indent >= 4 {
+            return false;
+        }
+
+        let after_indent = &line[indent..];
+
+        // Must start with the same fence character
+        if !after_indent.starts_with(fence_char) {
+            return false;
+        }
+
+        // Count fence characters (must be >= opening fence length)
+        let fence_len = after_indent
+            .chars()
+            .take_while(|&c| c == fence_char)
+            .count();
+        if fence_len < min_fence_len {
+            return false;
+        }
+
+        // After the fence, only whitespace is allowed
+        let after_fence = &after_indent[fence_len..];
+        after_fence.trim().is_empty()
     }
 
     fn parse_atx_heading(&self, line: &str) -> Option<Node> {
