@@ -16,6 +16,8 @@ pub enum Node {
     ListItem(Vec<Node>),      // Contains block-level content
     // Inline nodes
     Text(String),
-    Code(String), // Inline code span
-                  // More node types will be added incrementally
+    Code(String),        // Inline code span
+    Emphasis(Vec<Node>), // <em> tag
+    Strong(Vec<Node>),   // <strong> tag
+                         // More node types will be added incrementally
 }

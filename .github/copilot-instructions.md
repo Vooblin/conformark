@@ -3,7 +3,7 @@
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (29.6% baseline - 194/655 tests)
+1. Run `cargo test -- --nocapture` to see current coverage (32.4% baseline - 212/655 tests)
 2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
 3. Count tests in a section: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
 4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules
@@ -24,7 +24,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (**29.6% coverage** - 194/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
+**Current Status**: Test harness complete (**32.4% coverage** - 212/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
 
 ## Architecture & Design Goals
 
@@ -45,7 +45,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
      - Tight vs loose list detection
    - ⏳ Inline parsing (Phase 2):
      - Emphasis, links, code spans, images
-2. **AST** (`src/ast.rs`): `Node` enum with 9 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`. Expand incrementally as features are added.
+2. **AST** (`src/ast.rs`): `Node` enum with 10 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span). Expand incrementally as features are added.
 3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children. **Special handling for `ListItem`**: detects nested block elements (checks for `</p>`, `</blockquote>`, etc.) and adjusts formatting accordingly.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
 5. **Streaming API**: Not yet implemented.
@@ -64,7 +64,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 # Build project (Rust 2024 edition)
 cargo build --verbose
 
-# Run all tests including 655 spec tests (currently 194 passing, 29.6% coverage)
+# Run all tests including 655 spec tests (currently 212 passing, 32.4% coverage)
 cargo test --verbose
 
 # See detailed test output with pass/fail stats
@@ -104,7 +104,7 @@ cargo doc --no-deps --verbose
    ```
 2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
 3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 29.6%)
+4. **Track progress**: Coverage % increases as features are added (currently 32.4%)
 5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
 
 ### Dependencies
@@ -252,7 +252,7 @@ Use latest stable features. Check for breaking changes when they arise.
 ```
 src/
   lib.rs           # Public API: markdown_to_html()
-  ast.rs           # Node enum (9 variants currently)
+  ast.rs           # Node enum (10 variants currently)
   parser.rs        # Parser struct (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, lists, paragraphs)
   renderer.rs      # HtmlRenderer with escape_html()
   main.rs          # Binary entry point (if needed)

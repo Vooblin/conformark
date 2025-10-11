@@ -76,6 +76,14 @@ fn render_node(node: &Node) -> String {
         }
         Node::Text(text) => escape_html(text),
         Node::Code(code) => format!("<code>{}</code>", escape_html(code)),
+        Node::Emphasis(children) => {
+            let content: String = children.iter().map(render_node).collect();
+            format!("<em>{}</em>", content)
+        }
+        Node::Strong(children) => {
+            let content: String = children.iter().map(render_node).collect();
+            format!("<strong>{}</strong>", content)
+        }
     }
 }
 
