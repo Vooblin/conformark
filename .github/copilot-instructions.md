@@ -9,15 +9,18 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (0.2% coverage - 1/655 tests passing). Core architecture in place: `Parser` (stub), `HtmlRenderer` (basic escaping), and `Node` enum AST. Ready for incremental TDD implementation.
+**Current Status**: Test harness complete (14.7% coverage - 96/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, basic paragraphs), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding incrementally via TDD.
 
 ## Architecture & Design Goals
 
 ### Core Components (Implementation Status)
-1. **Parser** (`src/parser.rs`): Currently a stub returning `Node::Document(vec![])`. Needs two-phase parsing:
-   - Phase 1: Block structure (paragraphs, lists, blockquotes, code blocks)
-   - Phase 2: Inline elements (emphasis, links, code spans)
-2. **AST** (`src/ast.rs`): `Node` enum with 4 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `Text`. Expand incrementally as features are added.
+1. **Parser** (`src/parser.rs`): Line-by-line parser with implemented features:
+   - ✅ ATX headings (1-6 `#` levels with space requirement)
+   - ✅ Basic paragraphs (non-empty, non-heading lines)
+   - ⏳ Two-phase parsing architecture needed:
+     - Phase 1: Block structure (lists, blockquotes, code blocks, thematic breaks)
+     - Phase 2: Inline elements (emphasis, links, code spans, images)
+2. **AST** (`src/ast.rs`): `Node` enum with 5 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `Text`. Expand incrementally as features are added.
 3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
 5. **Streaming API**: Not yet implemented.
@@ -36,7 +39,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 # Build project (Rust 2024 edition)
 cargo build --verbose
 
-# Run all tests including 655 spec tests (currently 1 passing)
+# Run all tests including 655 spec tests (currently 96 passing)
 cargo test --verbose
 
 # See detailed test output with pass/fail stats
@@ -63,7 +66,7 @@ cargo doc --no-deps --verbose
 1. **Find relevant tests**: Search `tests/data/tests.json` by section (e.g., "Tabs", "Headings", "Lists")
 2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
 3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 0.2%)
+4. **Track progress**: Coverage % increases as features are added (currently 14.7%)
 5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
 
 ### Dependencies
@@ -234,13 +237,13 @@ src/
 ## Quick Start for AI Agents
 
 ### Before Writing Code
-1. Run `cargo test -- --nocapture` to see current coverage (0.2% baseline)
+1. Run `cargo test -- --nocapture` to see current coverage (14.7% baseline)
 2. Search `tests/data/tests.json` for test cases related to your feature (e.g., `grep "Tabs" tests/data/tests.json`)
 3. Read relevant sections in `assets/spec.txt` for precise CommonMark rules
 
 ### Implementation Pattern
 1. **Add AST node** in `src/ast.rs` (new `Node` variant)
-2. **Update parser** in `src/parser.rs` (currently stub - needs block/inline logic)
+2. **Update parser** in `src/parser.rs` (currently has ATX headings + basic paragraphs - needs more block/inline logic)
 3. **Update renderer** in `src/renderer.rs` (add pattern match for new node)
 4. **Run tests**: `cargo test -- --nocapture` to see pass rate increase
 5. **Check CI requirements**: `cargo fmt --check`, `cargo clippy`, `cargo doc`
