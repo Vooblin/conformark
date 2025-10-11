@@ -101,6 +101,7 @@ fn render_node(node: &Node) -> String {
                 format!("<a href=\"{}\">{}</a>", escape_html(destination), content)
             }
         }
+        Node::HardBreak => "<br />".to_string(),
     }
 }
 
