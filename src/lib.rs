@@ -8,7 +8,7 @@ use renderer::HtmlRenderer;
 
 /// Parse markdown text and render to HTML
 pub fn markdown_to_html(markdown: &str) -> String {
-    let parser = Parser::new();
+    let mut parser = Parser::new();
     let ast = parser.parse(markdown);
     let renderer = HtmlRenderer::new();
     renderer.render(&ast)
