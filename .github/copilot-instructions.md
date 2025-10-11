@@ -4,14 +4,14 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (2,337 lines - order matters!).
 
-**Where to focus next**: The largest test sections are "Emphasis and strong emphasis" (132 tests), "Links" (90 tests), and "List items" (48 tests). Current blockers: multi-line list items, nested lists, reference-style links/images, and full emphasis delimiter algorithm.
+**Where to focus next**: The largest remaining test sections are "Emphasis and strong emphasis" (132 tests), "Links" (90 tests), and "List items" (48 tests). Current blockers: nested lists, HTML blocks (7 types), and full emphasis delimiter algorithm.
 
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (51.1% baseline - 335/655 tests passing)
+1. Run `cargo test -- --nocapture` to see current coverage (56.8% baseline - 372/655 tests passing)
 2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
 3. Count tests in a section: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
 4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules (9,811 lines, 26 sections)
@@ -31,10 +31,9 @@
 - Link reference definitions: 27 tests (4%)
 
 **Quick wins for boosting coverage:**
-- Complete multi-line list item support (48 tests)
-- Implement reference-style links (27 tests)
-- Add backslash escape handling (13 tests)
-- Complete hard line breaks (15 tests)
+- Implement nested lists (significant portion of 48 list item tests)
+- Complete HTML block parsing (7 different types)
+- Refine emphasis delimiter algorithm
 
 ## Project Overview
 
@@ -45,7 +44,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (**51.1% coverage** - 335/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs, inline parsing with emphasis/strong/code spans/inline links/images), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
+**Current Status**: Test harness complete (**56.8% coverage** - 372/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, lists with multi-line items and tight/loose detection, paragraphs, inline parsing with emphasis/strong/code spans/inline links/images/autolinks/entities/escapes), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST with reference definition support. Implementation proceeding **incrementally via TDD**.
 
 ## Architecture & Design Goals
 
@@ -57,22 +56,30 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
    - ✅ Fenced code blocks (``` or ~~~ with 3+ chars, info strings, proper closing)
    - ✅ Indented code blocks (4+ space indentation, blank line handling)
    - ✅ Block quotes (`>` prefix, recursive parsing)
-   - ✅ Basic lists (unordered `-`, `+`, `*` and ordered `1.`, `2)` markers, flat structure only)
-   - ✅ Basic paragraphs (non-empty, non-heading lines)
-   - ✅ Basic inline parsing (emphasis `*`/`_`, strong `**`/`__`, code spans with backticks, inline links, inline images)
-   - ⏳ Advanced list features needed:
-     - Multi-line list items with continuation
-     - Nested lists
-     - List item containing multiple block elements (paragraphs, code blocks, etc.)
-     - Tight vs loose list detection
-   - ⏳ Advanced inline parsing (Phase 2):
-     - Reference-style images and links
+   - ✅ Lists (unordered `-`, `+`, `*` and ordered `1.`, `2)` markers)
+   - ✅ Multi-line list items (with continuation and block elements)
+   - ✅ Tight vs loose list detection (blank lines between items)
+   - ✅ Paragraphs (multi-line support with proper lazy continuation)
+   - ✅ Inline parsing:
+     - Emphasis `*`/`_` and strong `**`/`__` (simplified algorithm)
+     - Code spans with backticks
+     - Inline links `[text](url "title")` and images `![alt](url "title")`
+     - Reference-style links `[text][ref]` and images `![alt][ref]`
+     - Autolinks `<http://url>` and `<email@example.com>`
+     - HTML entities (`&nbsp;`, `&copy;`) and numeric character refs (`&#35;`, `&#x1F;`)
+     - Backslash escapes for ASCII punctuation
+     - Hard line breaks (backslash at end of line)
+   - ✅ Link reference definitions `[label]: url "title"` (stored in `HashMap`)
+   - ⏳ Advanced features needed:
+     - Nested lists (proper indentation tracking)
+     - HTML blocks (7 different types with distinct start/end conditions)
      - Full delimiter run algorithm for emphasis
-     - HTML entities, autolinks
+     - Raw HTML inline elements
 2. **AST** (`src/ast.rs`): `Node` enum with 16 variants: `Document`, `Paragraph`, `Heading`, `CodeBlock`, `ThematicBreak`, `BlockQuote`, `UnorderedList`, `OrderedList`, `ListItem`, `Text`, `Code` (inline code span), `Emphasis`, `Strong`, `Link`, `Image`, `HardBreak`. Expand incrementally as features are added.
 3. **Renderer** (`src/renderer.rs`): `HtmlRenderer` implemented with proper HTML escaping (`<>&"`). Pattern-match on `Node` enum, recursively render children. **Special handling for `ListItem`**: detects nested block elements (checks for `</p>`, `</blockquote>`, etc.) and adjusts formatting accordingly.
 4. **Public API** (`src/lib.rs`): `markdown_to_html(&str) -> String` chains parser → renderer.
-5. **Streaming API**: Not yet implemented.
+5. **Parser State** (`src/parser.rs`): Uses `HashMap<String, (String, Option<String>)>` to store link reference definitions with normalized labels (case-insensitive, whitespace-collapsed).
+6. **Streaming API**: Not yet implemented.
 
 ### Test Infrastructure (Fully Operational)
 - **`tests/spec_tests.rs`**: Loads 655 CommonMark v0.31.2 examples from `tests/data/tests.json` (26 sections total)
@@ -88,7 +95,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 # Build project (Rust 2024 edition)
 cargo build --verbose
 
-# Run all tests including 655 spec tests (currently 335 passing, 51.1% coverage)
+# Run all tests including 655 spec tests (currently 372 passing, 56.8% coverage)
 cargo test --verbose
 
 # See detailed test output with pass/fail stats
@@ -129,7 +136,7 @@ cargo doc --no-deps --verbose
    ```
 2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
 3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 51.1%)
+4. **Track progress**: Coverage % increases as features are added (currently 56.8%)
 5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
 
 ### Dependencies
@@ -381,9 +388,10 @@ src/
 
 ### Future Features (Not Yet Implemented)
 
-- **Reference-style Links/Images**: `[text][label]` with separate `[label]: url` definitions
-- **HTML Entities**: 2125+ HTML5 named entities, numeric entities (`&#123;`, `&#xAB;`)
-- **Emphasis Algorithm**: Full delimiter run algorithm (currently simplified)
+- **Nested Lists**: Proper indentation tracking for multi-level list nesting
+- **HTML Blocks**: Seven different start/end condition types
+- **Full Emphasis Algorithm**: Complete delimiter run algorithm per spec
+- **Raw HTML Inline**: Inline HTML tags in paragraphs and text
 - **Streaming API**: For large documents
 - **Performance**: Avoid backtracking, lazy evaluation, benchmark vs cmark/pulldown-cmark
 
@@ -398,14 +406,12 @@ src/
 ## Troubleshooting
 
 ### Common Test Failure Patterns (Current Implementation Gaps)
-The majority of current failures (320/655 tests) fall into these categories:
+The majority of current failures (283/655 tests) fall into these categories:
 1. **Tab handling in nested contexts**: Tabs within blockquotes, lists, and code blocks need proper expansion
-2. **Multi-line list items**: List items with continuation lines and nested block elements
-3. **Nested lists**: Lists within lists with proper indentation tracking
-4. **Tight vs loose lists**: Detection of blank lines between items
-5. **Advanced inline parsing**: Reference-style images/links, autolinks, HTML entities
-6. **HTML blocks**: Seven different start/end condition types
-7. **Link reference definitions**: `[label]: url "title"` parsing and resolution
+2. **Nested lists**: Lists within lists with proper indentation tracking
+3. **HTML blocks**: Seven different start/end condition types (46 tests)
+4. **Advanced inline parsing**: Full emphasis delimiter algorithm, raw HTML inline elements
+5. **Edge cases**: Complex list scenarios, indentation edge cases
 
 ### Tests failing after changes
 ```bash
