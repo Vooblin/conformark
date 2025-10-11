@@ -673,6 +673,7 @@ impl Parser {
     fn parse_list(&mut self, lines: &[&str], list_type: ListType) -> (Node, usize) {
         let mut items = Vec::new();
         let mut i = 0;
+        let mut has_blank_between_items = false;
 
         while i < lines.len() {
             // Check if current line is a list item of the same type
@@ -683,9 +684,20 @@ impl Parser {
                 }
 
                 // Parse this list item (multi-line support)
-                let (item, consumed) = self.parse_list_item(&lines[i..], &current_type);
+                let (item, consumed, item_has_blank) =
+                    self.parse_list_item(&lines[i..], &current_type);
                 items.push(item);
                 i += consumed;
+
+                // Check if there's a blank line before the next item
+                if i < lines.len() && lines[i].trim().is_empty() {
+                    has_blank_between_items = true;
+                }
+
+                // Item contains blank lines makes list loose
+                if item_has_blank {
+                    has_blank_between_items = true;
+                }
             } else if i > 0 && lines[i].trim().is_empty() {
                 // Blank line - might continue or end the list
                 // Look ahead to see if there's a continuation
@@ -700,6 +712,7 @@ impl Parser {
                     && list_type.is_compatible(&next_type)
                 {
                     // Continue to next list item
+                    has_blank_between_items = true;
                     i = j;
                     continue;
                 }
@@ -712,12 +725,36 @@ impl Parser {
             }
         }
 
+        // Apply tight/loose formatting to all items
+        let formatted_items = if has_blank_between_items {
+            // Loose list - items keep their paragraph tags
+            items
+        } else {
+            // Tight list - unwrap single paragraphs from items
+            items
+                .into_iter()
+                .map(|item| match item {
+                    Node::ListItem(children) => {
+                        let unwrapped = children
+                            .into_iter()
+                            .flat_map(|child| match child {
+                                Node::Paragraph(para_children) => para_children,
+                                other => vec![other],
+                            })
+                            .collect();
+                        Node::ListItem(unwrapped)
+                    }
+                    other => other,
+                })
+                .collect()
+        };
+
         // Create the appropriate list node
         let list_node = match list_type {
-            ListType::Unordered(_) => Node::UnorderedList(items),
+            ListType::Unordered(_) => Node::UnorderedList(formatted_items),
             ListType::Ordered(start, _) => Node::OrderedList {
                 start,
-                children: items,
+                children: formatted_items,
             },
         };
 
@@ -725,7 +762,8 @@ impl Parser {
     }
 
     /// Parse a single list item with multi-line support
-    fn parse_list_item(&mut self, lines: &[&str], list_type: &ListType) -> (Node, usize) {
+    /// Returns (Node, lines_consumed, has_blank_lines)
+    fn parse_list_item(&mut self, lines: &[&str], list_type: &ListType) -> (Node, usize, bool) {
         let first_line = lines[0];
 
         // Calculate the content indent (W + N)
@@ -800,7 +838,7 @@ impl Parser {
         };
 
         let item = Node::ListItem(final_children);
-        (item, i)
+        (item, i, has_blank)
     }
 
     /// Calculate the required indent for list item continuation
