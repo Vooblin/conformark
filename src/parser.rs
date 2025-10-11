@@ -286,9 +286,10 @@ impl Parser {
         let info = if info_string.is_empty() {
             String::new()
         } else {
-            // Extract first word for language class and process backslash escapes
+            // Extract first word for language class and process backslash escapes and entities
             let raw_info = info_string.split_whitespace().next().unwrap_or("");
-            self.process_backslash_escapes(raw_info)
+            let escaped = self.process_backslash_escapes(raw_info);
+            self.process_entities(&escaped)
         };
 
         let mut code_lines = Vec::new();
