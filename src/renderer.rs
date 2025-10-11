@@ -75,6 +75,7 @@ fn render_node(node: &Node) -> String {
             }
         }
         Node::Text(text) => escape_html(text),
+        Node::Code(code) => format!("<code>{}</code>", escape_html(code)),
     }
 }
 
