@@ -37,4 +37,18 @@ mod tests {
         let result = markdown_to_html("![bar](/path)\n");
         assert_eq!(result, "<p><img src=\"/path\" alt=\"bar\" /></p>\n");
     }
+
+    #[test]
+    fn test_html_entities() {
+        let result = markdown_to_html("&nbsp; &amp; &copy;\n");
+        println!("Entity test result: {:?}", result);
+        assert!(result.contains(" &amp; ©"));
+    }
+
+    #[test]
+    fn test_numeric_char_refs() {
+        let result = markdown_to_html("&#35; &#1234;\n");
+        println!("Numeric test result: {:?}", result);
+        assert!(result.contains("#"));
+    }
 }
