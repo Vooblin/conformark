@@ -51,4 +51,14 @@ mod tests {
         println!("Numeric test result: {:?}", result);
         assert!(result.contains("#"));
     }
+
+    #[test]
+    fn test_autolink() {
+        let result = markdown_to_html("<http://foo.bar.baz>\n");
+        println!("Autolink test result: {:?}", result);
+        assert_eq!(
+            result,
+            "<p><a href=\"http://foo.bar.baz\">http://foo.bar.baz</a></p>\n"
+        );
+    }
 }
