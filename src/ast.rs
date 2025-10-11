@@ -33,5 +33,6 @@ pub enum Node {
         title: Option<String>,
         children: Vec<Node>,
     },
-    // More node types will be added incrementally
+    HardBreak, // <br /> tag (backslash at end of line)
+               // More node types will be added incrementally
 }

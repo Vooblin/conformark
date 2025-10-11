@@ -3,7 +3,7 @@
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (38.9% baseline - 255/655 tests passing)
+1. Run `cargo test -- --nocapture` to see current coverage (39.2% baseline - 257/655 tests passing)
 2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
 3. Count tests in a section: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
 4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules (9,811 lines, 26 sections)
@@ -24,7 +24,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 - Optional GFM (GitHub Flavored Markdown) extensions
 - Full CommonMark spec-test coverage (655 tests from v0.31.2)
 
-**Current Status**: Test harness complete (**38.9% coverage** - 255/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs, basic inline parsing with emphasis/strong/code spans/inline links), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
+**Current Status**: Test harness complete (**39.2% coverage** - 257/655 tests passing). Core architecture in place with working implementations: `Parser` (ATX headings, Setext headings, thematic breaks, fenced code blocks, indented code blocks, blockquotes, basic lists, basic paragraphs, basic inline parsing with emphasis/strong/code spans/inline links), `HtmlRenderer` (proper HTML escaping), and `Node` enum AST. Implementation proceeding **incrementally via TDD**.
 
 ## Architecture & Design Goals
 
@@ -67,7 +67,7 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 # Build project (Rust 2024 edition)
 cargo build --verbose
 
-# Run all tests including 655 spec tests (currently 255 passing, 38.9% coverage)
+# Run all tests including 655 spec tests (currently 257 passing, 39.2% coverage)
 cargo test --verbose
 
 # See detailed test output with pass/fail stats
@@ -107,7 +107,7 @@ cargo doc --no-deps --verbose
    ```
 2. **Implement incrementally**: Add `Node` variants to `src/ast.rs`, then parser logic in `src/parser.rs`
 3. **Run spec tests**: `cargo test -- --nocapture` shows which examples pass/fail
-4. **Track progress**: Coverage % increases as features are added (currently 38.9%)
+4. **Track progress**: Coverage % increases as features are added (currently 39.2%)
 5. **Reference spec**: `assets/spec.txt` (9,811 lines) has authoritative CommonMark v0.31.2 rules
 
 ### Dependencies
@@ -377,7 +377,7 @@ src/
 ## Troubleshooting
 
 ### Common Test Failure Patterns (Current Implementation Gaps)
-The majority of current failures (400/655 tests) fall into these categories:
+The majority of current failures (398/655 tests) fall into these categories:
 1. **Tab handling in nested contexts**: Tabs within blockquotes, lists, and code blocks need proper expansion
 2. **Multi-line list items**: List items with continuation lines and nested block elements
 3. **Nested lists**: Lists within lists with proper indentation tracking

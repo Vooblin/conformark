@@ -782,6 +782,28 @@ impl Parser {
         let mut i = 0;
 
         while i < chars.len() {
+            // Handle backslash escapes first
+            if chars[i] == '\\' && i + 1 < chars.len() {
+                // Check for hard line break (backslash at end of line)
+                if chars[i + 1] == '\n' {
+                    nodes.push(Node::HardBreak);
+                    i += 2;
+                    continue;
+                }
+                // Check if next char is ASCII punctuation
+                else if self.is_ascii_punctuation(chars[i + 1]) {
+                    // Escaped punctuation - treat as literal text
+                    nodes.push(Node::Text(chars[i + 1].to_string()));
+                    i += 2;
+                    continue;
+                } else {
+                    // Not escapable - backslash is literal
+                    nodes.push(Node::Text('\\'.to_string()));
+                    i += 1;
+                    continue;
+                }
+            }
+
             // Try to parse code span first (takes precedence)
             if chars[i] == '`'
                 && let Some((code_node, new_i)) = self.try_parse_code_span(&chars, i)
@@ -812,6 +834,7 @@ impl Parser {
             // Collect regular text until next special character
             let text_start = i;
             while i < chars.len()
+                && chars[i] != '\\'
                 && chars[i] != '`'
                 && chars[i] != '*'
                 && chars[i] != '_'
@@ -836,6 +859,64 @@ impl Parser {
         }
 
         nodes
+    }
+
+    /// Check if a character is ASCII punctuation (can be backslash-escaped)
+    fn is_ascii_punctuation(&self, ch: char) -> bool {
+        matches!(
+            ch,
+            '!' | '"'
+                | '#'
+                | '$'
+                | '%'
+                | '&'
+                | '\''
+                | '('
+                | ')'
+                | '*'
+                | '+'
+                | ','
+                | '-'
+                | '.'
+                | '/'
+                | ':'
+                | ';'
+                | '<'
+                | '='
+                | '>'
+                | '?'
+                | '@'
+                | '['
+                | '\\'
+                | ']'
+                | '^'
+                | '_'
+                | '`'
+                | '{'
+                | '|'
+                | '}'
+                | '~'
+        )
+    }
+
+    /// Process backslash escapes in a string (for link destinations/titles)
+    fn process_backslash_escapes(&self, text: &str) -> String {
+        let chars: Vec<char> = text.chars().collect();
+        let mut result = String::new();
+        let mut i = 0;
+
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() && self.is_ascii_punctuation(chars[i + 1]) {
+                // Escaped punctuation - include the literal character
+                result.push(chars[i + 1]);
+                i += 2;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+
+        result
     }
 
     fn try_parse_code_span(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
@@ -1059,7 +1140,8 @@ impl Parser {
             if i >= chars.len() || chars[i] != '>' {
                 return None; // Unclosed angle bracket
             }
-            destination = chars[dest_start..i].iter().collect();
+            let raw_dest: String = chars[dest_start..i].iter().collect();
+            destination = self.process_backslash_escapes(&raw_dest);
             i += 1; // Move past '>'
         } else {
             // Raw destination (no spaces allowed unless in parens)
@@ -1080,7 +1162,8 @@ impl Parser {
                 }
                 i += 1;
             }
-            destination = chars[dest_start..i].iter().collect();
+            let raw_dest: String = chars[dest_start..i].iter().collect();
+            destination = self.process_backslash_escapes(&raw_dest);
 
             // Check for invalid characters in destination (spaces outside parens)
             if destination.contains(|c: char| c.is_whitespace()) && paren_depth == 0 {
@@ -1111,7 +1194,8 @@ impl Parser {
                 return None; // Unclosed title
             }
 
-            title = Some(chars[title_start..i].iter().collect());
+            let raw_title: String = chars[title_start..i].iter().collect();
+            title = Some(self.process_backslash_escapes(&raw_title));
             i += 1; // Move past closing quote
 
             // Skip trailing whitespace
