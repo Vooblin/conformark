@@ -80,16 +80,26 @@ impl Parser {
     }
 
     fn is_indented_code_line(&self, line: &str) -> bool {
-        // A line with 4+ spaces/tabs of indentation (tabs count as 4 spaces)
-        let mut indent = 0;
+        // A line with 4+ columns of indentation
+        // Tabs advance to next multiple of 4 columns
+        let indent_cols = self.count_indent_columns(line);
+        indent_cols >= 4 && !line.trim().is_empty()
+    }
+
+    /// Count the number of columns of indentation, treating tabs as advancing to next multiple of 4
+    fn count_indent_columns(&self, line: &str) -> usize {
+        let mut col = 0;
         for ch in line.chars() {
             match ch {
-                ' ' => indent += 1,
-                '\t' => indent += 4,
+                ' ' => col += 1,
+                '\t' => {
+                    // Tab advances to next multiple of 4
+                    col = (col / 4 + 1) * 4;
+                }
                 _ => break,
             }
         }
-        indent >= 4 && !line.trim().is_empty()
+        col
     }
 
     fn parse_indented_code_block(&self, lines: &[&str]) -> (Node, usize) {
@@ -145,31 +155,36 @@ impl Parser {
     }
 
     fn remove_code_indent(&self, line: &str) -> String {
-        let mut remaining_indent = 4;
+        // Remove up to 4 columns of indentation
+        // Tabs advance to next multiple of 4 columns
+        let mut col = 0;
+        let mut chars = line.chars().peekable();
         let mut result = String::new();
-        let mut chars = line.chars();
 
-        // Remove up to 4 spaces of indentation
-        while remaining_indent > 0 {
-            match chars.next() {
-                Some(' ') => remaining_indent -= 1,
-                Some('\t') => {
-                    // Tab counts as 4 spaces, but we only remove what we need
-                    if remaining_indent >= 4 {
-                        remaining_indent -= 4;
+        // Skip up to 4 columns of indentation
+        while col < 4 {
+            match chars.peek() {
+                Some(&' ') => {
+                    chars.next();
+                    col += 1;
+                }
+                Some(&'\t') => {
+                    chars.next();
+                    let next_tab_stop = (col / 4 + 1) * 4;
+                    if next_tab_stop <= 4 {
+                        // Tab fits entirely within the 4 columns to remove
+                        col = next_tab_stop;
                     } else {
-                        // Partial tab removal: add spaces for the remainder
-                        for _ in 0..(4 - remaining_indent) {
+                        // Partial tab: it extends beyond 4 columns
+                        // Add spaces for the part that extends beyond
+                        let spaces_to_add = next_tab_stop - 4;
+                        for _ in 0..spaces_to_add {
                             result.push(' ');
                         }
-                        remaining_indent = 0;
+                        col = 4;
                     }
                 }
-                Some(ch) => {
-                    result.push(ch);
-                    break;
-                }
-                None => break,
+                _ => break,
             }
         }
 
@@ -445,15 +460,57 @@ impl Parser {
 
         // Remove the > marker
         if let Some(after_marker) = after_indent.strip_prefix('>') {
-            // Remove optional space after >
-            if let Some(stripped) = after_marker.strip_prefix(' ') {
-                stripped.to_string()
+            // The > can be followed by an optional space (or tab treated as spaces)
+            // We need to expand tabs to spaces based on column position,
+            // then remove one column for the optional space after >
+
+            if let Some(rest) = after_marker.strip_prefix(' ') {
+                // Simple case: space after >, just remove it
+                rest.to_string()
+            } else if after_marker.starts_with('\t') || !after_marker.is_empty() {
+                // Need to handle tabs by expanding to spaces based on column position
+                // Start at column (indent + 1) because we're right after the >
+                let start_col = indent + 1;
+                let expanded = self.expand_tabs(after_marker, start_col);
+
+                // Remove one column (the optional space after >)
+                if let Some(rest) = expanded.strip_prefix(' ') {
+                    rest.to_string()
+                } else {
+                    expanded
+                }
             } else {
-                after_marker.to_string()
+                // No content after >
+                String::new()
             }
         } else {
             line.to_string()
         }
+    }
+
+    /// Expand tabs to spaces based on column position
+    /// Tabs advance to the next multiple of 4
+    fn expand_tabs(&self, text: &str, start_col: usize) -> String {
+        let mut result = String::new();
+        let mut col = start_col;
+
+        for ch in text.chars() {
+            if ch == '\t' {
+                // Advance to next tab stop (multiple of 4)
+                let next_stop = (col / 4 + 1) * 4;
+                let spaces = next_stop - col;
+                result.push_str(&" ".repeat(spaces));
+                col = next_stop;
+            } else if ch == '\n' {
+                result.push(ch);
+                col = 0; // Reset column at newline
+            } else {
+                result.push(ch);
+                col += 1;
+            }
+        }
+
+        result
     }
 
     /// Check if a line can continue a blockquote via lazy continuation
