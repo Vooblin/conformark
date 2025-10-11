@@ -3,10 +3,10 @@
 ## Quick Start for AI Agents
 
 **Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage (38.9% baseline - 255/655 tests)
+1. Run `cargo test -- --nocapture` to see current coverage (38.9% baseline - 255/655 tests passing)
 2. Search `tests/data/tests.json` for test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
 3. Count tests in a section: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
-4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules
+4. Read relevant sections in `assets/spec.txt` for authoritative CommonMark v0.31.2 rules (9,811 lines, 26 sections)
 
 **To add a feature:**
 1. Add `Node` variant to `src/ast.rs` (e.g., `Emphasis(Vec<Node>)`)
@@ -54,11 +54,11 @@ Conformark is a **CommonMark-compliant Markdown engine** (parser + renderer) wri
 5. **Streaming API**: Not yet implemented.
 
 ### Test Infrastructure (Fully Operational)
-- **`tests/spec_tests.rs`**: Loads 655 CommonMark v0.31.2 examples from `tests/data/tests.json`
+- **`tests/spec_tests.rs`**: Loads 655 CommonMark v0.31.2 examples from `tests/data/tests.json` (26 sections total)
 - Reports pass/fail stats with detailed first 5 failures
-- Currently non-failing test (tracking only) - will enforce once implementation starts
+- Currently non-failing test (tracking only) - will enforce once implementation is complete
 - Test format: `{ markdown, html, example, start_line, end_line, section }`
-- Example test data: tabs expand to spaces, lists, blockquotes, code blocks, etc.
+- Run with `cargo test -- --nocapture` to see detailed failure output with diffs
 
 ## Development Workflow
 
@@ -119,11 +119,11 @@ cargo doc --no-deps --verbose
 ## Coding Conventions
 
 ### Rust Edition 2024
-Use latest stable features. Check for breaking changes when they arise.
+Use latest stable features. Minimum Rust version: 1.85+. Check for edition-related breaking changes.
 
 ### Testing Strategy
 1. **Spec compliance first**: Every parser/renderer feature must pass corresponding CommonMark tests
-2. **Non-failing tests**: `tests/spec_tests.rs` currently doesn't fail CI (tracking mode). This is intentional during incremental development - the test reports pass/fail statistics but doesn't block the build. Will become strict once core features are complete.
+2. **Non-failing tests**: `tests/spec_tests.rs` currently tracks progress but doesn't block CI. This is intentional during incremental development - tests report pass/fail statistics for visibility. Will become strict enforcement once core features are complete.
 3. **Incremental validation**: After each feature, run `cargo test -- --nocapture` to see new passing tests
 4. **Reference test structure** (`tests/data/tests.json`):
    ```json
@@ -136,7 +136,7 @@ Use latest stable features. Check for breaking changes when they arise.
      "section": "Tabs"
    }
    ```
-5. **Test output format**: First 5 failures show detailed diffs (input, expected, actual), then summary statistics
+5. **Test output format**: First 5 failures show detailed diffs (input, expected, actual), then summary statistics with example numbers
 
 ### Current Implementation Patterns
 
@@ -375,6 +375,16 @@ src/
 5. **Emphasis precedence**: Code spans and HTML tags take precedence over emphasis
 
 ## Troubleshooting
+
+### Common Test Failure Patterns (Current Implementation Gaps)
+The majority of current failures (400/655 tests) fall into these categories:
+1. **Tab handling in nested contexts**: Tabs within blockquotes, lists, and code blocks need proper expansion
+2. **Multi-line list items**: List items with continuation lines and nested block elements
+3. **Nested lists**: Lists within lists with proper indentation tracking
+4. **Tight vs loose lists**: Detection of blank lines between items
+5. **Advanced inline parsing**: Images, reference links, autolinks, HTML entities
+6. **HTML blocks**: Seven different start/end condition types
+7. **Link reference definitions**: `[label]: url "title"` parsing and resolution
 
 ### Tests failing after changes
 ```bash
