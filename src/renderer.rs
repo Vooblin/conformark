@@ -46,11 +46,15 @@ fn render_node(node: &Node) -> String {
             let content: String = children.iter().map(render_node).collect();
             format!("<blockquote>\n{}</blockquote>\n", content)
         }
-        Node::UnorderedList(children) => {
+        Node::UnorderedList { tight: _, children } => {
             let content: String = children.iter().map(render_node).collect();
             format!("<ul>\n{}</ul>\n", content)
         }
-        Node::OrderedList { start, children } => {
+        Node::OrderedList {
+            start,
+            tight: _,
+            children,
+        } => {
             let content: String = children.iter().map(render_node).collect();
             if *start == 1 {
                 format!("<ol>\n{}</ol>\n", content)
@@ -66,7 +70,7 @@ fn render_node(node: &Node) -> String {
                     Node::Paragraph(_)
                         | Node::BlockQuote(_)
                         | Node::CodeBlock { .. }
-                        | Node::UnorderedList(_)
+                        | Node::UnorderedList { .. }
                         | Node::OrderedList { .. }
                         | Node::ThematicBreak
                 )

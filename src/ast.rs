@@ -17,12 +17,16 @@ pub enum Node {
     ThematicBreak,
     BlockQuote(Vec<Node>),
     // List nodes
-    UnorderedList(Vec<Node>), // Contains ListItem nodes
+    UnorderedList {
+        tight: bool,         // Tight lists don't add <p> tags in simple items
+        children: Vec<Node>, // Contains ListItem nodes
+    },
     OrderedList {
         start: u32,
+        tight: bool,
         children: Vec<Node>,
     }, // Contains ListItem nodes
-    ListItem(Vec<Node>),      // Contains block-level content
+    ListItem(Vec<Node>), // Contains block-level content
     // Inline nodes
     Text(String),
     Code(String),        // Inline code span
