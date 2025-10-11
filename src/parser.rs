@@ -1001,6 +1001,15 @@ impl Parser {
                 }
             }
 
+            // Try to parse HTML entity or numeric character reference
+            if chars[i] == '&'
+                && let Some((entity_text, new_i)) = self.try_parse_entity(&chars, i)
+            {
+                nodes.push(Node::Text(entity_text));
+                i = new_i;
+                continue;
+            }
+
             // Try to parse code span first (takes precedence)
             if chars[i] == '`'
                 && let Some((code_node, new_i)) = self.try_parse_code_span(&chars, i)
@@ -1052,6 +1061,7 @@ impl Parser {
             let text_start = i;
             while i < chars.len()
                 && chars[i] != '\\'
+                && chars[i] != '&'
                 && chars[i] != '`'
                 && chars[i] != '*'
                 && chars[i] != '_'
@@ -1689,6 +1699,113 @@ impl Parser {
         }
 
         false
+    }
+
+    /// Try to parse an HTML entity or numeric character reference
+    /// Returns (decoded_text, position_after) if successful
+    fn try_parse_entity(&self, chars: &[char], start: usize) -> Option<(String, usize)> {
+        if start >= chars.len() || chars[start] != '&' {
+            return None;
+        }
+
+        let mut i = start + 1;
+
+        // Check for numeric character reference
+        if i < chars.len() && chars[i] == '#' {
+            i += 1;
+
+            // Hexadecimal reference: &#X or &#x
+            if i < chars.len() && (chars[i] == 'X' || chars[i] == 'x') {
+                i += 1;
+                let hex_start = i;
+
+                // Collect 1-6 hex digits
+                while i < chars.len() && i - hex_start < 6 && chars[i].is_ascii_hexdigit() {
+                    i += 1;
+                }
+
+                if i > hex_start && i < chars.len() && chars[i] == ';' {
+                    let hex_str: String = chars[hex_start..i].iter().collect();
+                    if let Ok(code_point) = u32::from_str_radix(&hex_str, 16) {
+                        // Replace invalid/null with replacement character
+                        let ch = if code_point == 0 || code_point > 0x10FFFF {
+                            '\u{FFFD}'
+                        } else {
+                            char::from_u32(code_point).unwrap_or('\u{FFFD}')
+                        };
+                        return Some((ch.to_string(), i + 1));
+                    }
+                }
+            }
+            // Decimal reference: &#
+            else {
+                let dec_start = i;
+
+                // Collect 1-7 decimal digits
+                while i < chars.len() && i - dec_start < 7 && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
+
+                if i > dec_start && i < chars.len() && chars[i] == ';' {
+                    let dec_str: String = chars[dec_start..i].iter().collect();
+                    if let Ok(code_point) = dec_str.parse::<u32>() {
+                        // Replace invalid/null with replacement character
+                        let ch = if code_point == 0 || code_point > 0x10FFFD {
+                            '\u{FFFD}'
+                        } else {
+                            char::from_u32(code_point).unwrap_or('\u{FFFD}')
+                        };
+                        return Some((ch.to_string(), i + 1));
+                    }
+                }
+            }
+        }
+        // Check for named entity
+        else {
+            let name_start = i;
+
+            // Collect alphanumeric characters (entity name)
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric()) {
+                i += 1;
+            }
+
+            if i > name_start && i < chars.len() && chars[i] == ';' {
+                let entity_name: String = chars[name_start..i].iter().collect();
+
+                // Look up entity in HTML5 entity map
+                if let Some(decoded) = self.decode_html_entity(&entity_name) {
+                    return Some((decoded, i + 1));
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Decode HTML5 named entities
+    /// This is a subset of HTML5 entities - add more as needed
+    fn decode_html_entity(&self, name: &str) -> Option<String> {
+        let decoded = match name {
+            "nbsp" => "\u{00A0}", // Non-breaking space
+            "amp" => "&",
+            "lt" => "<",
+            "gt" => ">",
+            "quot" => "\"",
+            "apos" => "'",
+            "copy" => "©",                     // ©
+            "reg" => "®",                      // ®
+            "AElig" => "Æ",                    // Æ
+            "Dcaron" => "Ď",                   // Ď
+            "frac34" => "¾",                   // ¾
+            "HilbertSpace" => "ℋ",             // ℋ
+            "DifferentialD" => "ⅆ",            // ⅆ
+            "ClockwiseContourIntegral" => "∲", // ∲
+            "ngE" => "≧̸",                      // ≧̸ (combining character)
+            "ouml" => "ö",                     // ö
+            _ => return None,
+        };
+
+        Some(decoded.to_string())
     }
 
     fn is_email_address(&self, text: &str) -> bool {
