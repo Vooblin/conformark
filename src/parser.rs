@@ -1687,6 +1687,71 @@ impl Parser {
         result
     }
 
+    /// Decode HTML entities in a string
+    fn process_entities(&self, text: &str) -> String {
+        let chars: Vec<char> = text.chars().collect();
+        let mut result = String::new();
+        let mut i = 0;
+
+        while i < chars.len() {
+            if chars[i] == '&'
+                && let Some((decoded, new_i)) = self.try_parse_entity(&chars, i)
+            {
+                result.push_str(&decoded);
+                i = new_i;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+
+        result
+    }
+
+    /// URL-encode a string for use in href attributes (percent-encode non-ASCII and special chars)
+    fn url_encode(&self, text: &str) -> String {
+        let mut result = String::new();
+
+        for ch in text.chars() {
+            // ASCII alphanumeric and safe URL characters pass through
+            if ch.is_ascii_alphanumeric()
+                || matches!(
+                    ch,
+                    '-' | '_'
+                        | '.'
+                        | '~'
+                        | '!'
+                        | '*'
+                        | '\''
+                        | '('
+                        | ')'
+                        | ';'
+                        | ':'
+                        | '@'
+                        | '&'
+                        | '='
+                        | '+'
+                        | '$'
+                        | ','
+                        | '/'
+                        | '?'
+                        | '#'
+                        | '['
+                        | ']'
+                )
+            {
+                result.push(ch);
+            } else {
+                // Percent-encode as UTF-8 bytes
+                for byte in ch.to_string().as_bytes() {
+                    result.push_str(&format!("%{:02X}", byte));
+                }
+            }
+        }
+
+        result
+    }
+
     fn try_parse_code_span(&self, chars: &[char], start: usize) -> Option<(Node, usize)> {
         let mut i = start;
         let mut backtick_count = 0;
@@ -1936,7 +2001,10 @@ impl Parser {
                 return None; // Unclosed angle bracket
             }
             let raw_dest: String = chars[dest_start..i].iter().collect();
-            destination = self.process_backslash_escapes(&raw_dest);
+            // Process backslash escapes, then entities, then URL-encode
+            let escaped_dest = self.process_backslash_escapes(&raw_dest);
+            let entity_decoded = self.process_entities(&escaped_dest);
+            destination = self.url_encode(&entity_decoded);
             i += 1; // Move past '>'
         } else {
             // Raw destination (no spaces allowed unless in parens)
@@ -1958,10 +2026,13 @@ impl Parser {
                 i += 1;
             }
             let raw_dest: String = chars[dest_start..i].iter().collect();
-            destination = self.process_backslash_escapes(&raw_dest);
+            // Process backslash escapes, then entities, then URL-encode
+            let escaped_dest = self.process_backslash_escapes(&raw_dest);
+            let entity_decoded = self.process_entities(&escaped_dest);
+            destination = self.url_encode(&entity_decoded);
 
             // Check for invalid characters in destination (spaces outside parens)
-            if destination.contains(|c: char| c.is_whitespace()) && paren_depth == 0 {
+            if entity_decoded.contains(|c: char| c.is_whitespace()) && paren_depth == 0 {
                 return None; // Invalid destination
             }
         }
@@ -1990,7 +2061,9 @@ impl Parser {
             }
 
             let raw_title: String = chars[title_start..i].iter().collect();
-            title = Some(self.process_backslash_escapes(&raw_title));
+            // Process backslash escapes, then entities (no URL encoding for titles)
+            let escaped_title = self.process_backslash_escapes(&raw_title);
+            title = Some(self.process_entities(&escaped_title));
             i += 1; // Move past closing quote
 
             // Skip trailing whitespace
@@ -2183,7 +2256,10 @@ impl Parser {
                 return None; // Unclosed angle bracket
             }
             let raw_dest: String = chars[dest_start..i].iter().collect();
-            destination = self.process_backslash_escapes(&raw_dest);
+            // Process backslash escapes, then entities, then URL-encode
+            let escaped_dest = self.process_backslash_escapes(&raw_dest);
+            let entity_decoded = self.process_entities(&escaped_dest);
+            destination = self.url_encode(&entity_decoded);
             i += 1; // Move past '>'
         } else {
             // Raw destination (no spaces allowed unless in parens)
@@ -2205,10 +2281,13 @@ impl Parser {
                 i += 1;
             }
             let raw_dest: String = chars[dest_start..i].iter().collect();
-            destination = self.process_backslash_escapes(&raw_dest);
+            // Process backslash escapes, then entities, then URL-encode
+            let escaped_dest = self.process_backslash_escapes(&raw_dest);
+            let entity_decoded = self.process_entities(&escaped_dest);
+            destination = self.url_encode(&entity_decoded);
 
             // Check for invalid characters in destination (spaces outside parens)
-            if destination.contains(|c: char| c.is_whitespace()) && paren_depth == 0 {
+            if entity_decoded.contains(|c: char| c.is_whitespace()) && paren_depth == 0 {
                 return None; // Invalid destination
             }
         }
@@ -2237,7 +2316,9 @@ impl Parser {
             }
 
             let raw_title: String = chars[title_start..i].iter().collect();
-            title = Some(self.process_backslash_escapes(&raw_title));
+            // Process backslash escapes, then entities (no URL encoding for titles)
+            let escaped_title = self.process_backslash_escapes(&raw_title);
+            title = Some(self.process_entities(&escaped_title));
             i += 1; // Move past closing quote
 
             // Skip trailing whitespace
@@ -2750,9 +2831,12 @@ impl Parser {
             while i < chars.len() {
                 match chars[i] {
                     '>' => {
+                        // Process entities and URL-encode
+                        let entity_decoded = self.process_entities(&dest);
+                        let url_encoded = self.url_encode(&entity_decoded);
                         // Calculate byte offset
                         let byte_offset = chars[..=i].iter().map(|c| c.len_utf8()).sum();
-                        return Some((dest, byte_offset));
+                        return Some((url_encoded, byte_offset));
                     }
                     '\\' if i + 1 < chars.len() && self.is_ascii_punctuation(chars[i + 1]) => {
                         // Backslash escape of ASCII punctuation
@@ -2815,9 +2899,12 @@ impl Parser {
         if dest.is_empty() {
             None
         } else {
+            // Process entities and URL-encode
+            let entity_decoded = self.process_entities(&dest);
+            let url_encoded = self.url_encode(&entity_decoded);
             // Calculate byte offset
             let byte_offset = chars[..i].iter().map(|c| c.len_utf8()).sum();
-            Some((dest, byte_offset))
+            Some((url_encoded, byte_offset))
         }
     }
 
@@ -2844,9 +2931,11 @@ impl Parser {
         while i < chars.len() {
             match chars[i] {
                 ch if ch == closing_delimiter => {
+                    // Decode entities in title
+                    let entity_decoded = self.process_entities(&title);
                     // Calculate byte offset
                     let byte_offset = chars[..=i].iter().map(|c| c.len_utf8()).sum();
-                    return Some((title, byte_offset));
+                    return Some((entity_decoded, byte_offset));
                 }
                 '\\' if i + 1 < chars.len() && self.is_ascii_punctuation(chars[i + 1]) => {
                     // Backslash escape of ASCII punctuation
