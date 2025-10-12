@@ -12,14 +12,17 @@ cargo run --example test_emphasis  # Run 132 emphasis tests only
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
 
+**Project goal**: Implement a fast, memory-safe CommonMark parser with stable AST, streaming APIs, and optional GFM extensions. Currently achieving 90.5% spec compliance through incremental test-driven development.
+
 ## Architecture (5-File Core)
 
 - `src/ast.rs` (49 lines): Single `Node` enum with 18 variants representing the AST. All nodes are serializable via serde.
-- `src/parser.rs` (3,941 lines): **Two-phase parsing architecture** with 45 methods
+- `src/parser.rs` (4,013 lines): **Two-phase parsing architecture** with 44 methods
   - **Phase 1 (lines 17-146)**: Scan entire input to collect link reference definitions into `HashMap<String, (String, Option<String>)>`. Skips fenced/indented code blocks and recursively checks blockquotes where link refs can/can't appear.
   - **Phase 2 (lines 147+)**: Parse blocks in critical order (see below), using collected references for inline link resolution.
   - `Parser` struct holds only `reference_definitions` HashMap - stateless for each `parse()` call.
   - **Naming convention**: `is_*` predicates, `parse_*` block parsers (return `(Node, usize)`), `try_parse_*` inline parsers (return `Option<(Node, usize)>`)
+  - **Why two phases?** Link references can be defined anywhere in the document but must be resolved during inline parsing. The first pass finds all definitions without parsing inline content, enabling single-pass inline parsing in phase 2.
 - `src/renderer.rs` (206 lines): Recursive pattern matching on `Node` → HTML with proper escaping. All block elements output trailing `\n`.
 - `src/lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String` + 6 unit tests for edge cases (entities, images, autolinks).
 - `src/main.rs` (11 lines): CLI tool that reads stdin → outputs HTML.
@@ -27,6 +30,8 @@ cargo run --example test_emphasis  # Run 132 emphasis tests only
 **Note**: Uses Rust edition 2024 (cutting edge). Line counts approximate and may drift with development.
 
 **Quick Start**: `echo "**bold**" | cargo run` or `cargo test -- --nocapture` to see test results with diffs and coverage (currently 90.5%).
+
+**Key insight**: The parser is a two-pass scanner. Pass 1 collects all `[label]: destination` definitions (skipping code blocks where they don't apply). Pass 2 parses blocks in strict precedence order - changing this order breaks tests. This enables single-pass inline parsing with all link refs already known.
 
 ## Critical Parser Order (src/parser.rs lines 147-400)
 
@@ -72,7 +77,7 @@ After phase 1 collects link references, the `parse()` method checks blocks in th
    }
    ```
 
-**Find parser methods**: `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` (shows 45 methods: ~20 `is_*` predicates, ~15 `parse_*` block parsers, ~10 `try_parse_*` inline parsers)
+**Find parser methods**: `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` (shows 44 methods: ~17 `is_*` predicates, ~13 `parse_*` block parsers, ~14 `try_parse_*` inline parsers)
 
 ## Essential Workflows
 
@@ -110,12 +115,12 @@ jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn  # Count b
 
 ## Implementation Patterns
 
-**Parser method naming convention** (45 methods total - use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all):
+**Parser method naming convention** (44 methods total - use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all):
 - `is_*` (17 methods): Predicate methods check if line/position matches pattern, return `bool` or `Option<T>`
   - Examples: `is_indented_code_line()`, `is_thematic_break()`, `is_blockquote_start()`
 - `parse_*` (13 methods): Consume input, return `(Node, usize)` where `usize` = lines/chars consumed
   - Examples: `parse_paragraph()`, `parse_blockquote()`, `parse_list()`
-- `try_parse_*` (15 methods): Optional parsing for inline elements, return `Option<(Node, usize)>`
+- `try_parse_*` (14 methods): Optional parsing for inline elements, return `Option<(Node, usize)>`
   - Examples: `try_parse_link()`, `try_parse_code_span()`, `try_parse_autolink()`
 
 **Lookahead pattern** (used in indented code blocks + setext headings):
