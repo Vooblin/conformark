@@ -4,7 +4,7 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,490 lines - order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,525 lines - order matters!).
 
 **Current status**: 75.6% coverage (495/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, remaining tab/indentation edge cases.
 
@@ -30,10 +30,10 @@
 
 **Three-file core** (`src/ast.rs`, `src/parser.rs`, `src/renderer.rs`):
 - `ast.rs`: 18 `Node` enum variants with serde derives - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `parser.rs`: 3,490 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
-- `renderer.rs`: 201 lines, recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
+- `parser.rs`: 3,525 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
+- `renderer.rs`: 205 lines, recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
 
-**Public API** (`src/lib.rs`): Single function `markdown_to_html(&str) -> String`
+**Public API** (`src/lib.rs`, 64 lines): Single function `markdown_to_html(&str) -> String`
 
 **Binary CLI** (`src/main.rs`): Reads markdown from stdin, outputs HTML to stdout
 ```bash
@@ -217,9 +217,9 @@ jq '.[] | select(.example == 123)' tests/data/tests.json
 ```
 src/
   lib.rs           # Public API: markdown_to_html() (64 lines)
-  ast.rs           # Node enum (18 variants, 45 lines)
-  parser.rs        # Parser struct (3,490 lines)
-  renderer.rs      # HtmlRenderer with escape_html() (201 lines)
+  ast.rs           # Node enum (18 variants, 49 lines)
+  parser.rs        # Parser struct (3,525 lines)
+  renderer.rs      # HtmlRenderer with escape_html() (205 lines)
   main.rs          # Binary entry point (11 lines)
 
 tests/
