@@ -792,6 +792,7 @@ impl Parser {
     }
 
     /// Check if a line contains a complete HTML tag followed only by whitespace
+    /// For HTML block type 7: must be a SINGLE complete tag (open or close) with optional whitespace after
     fn is_complete_tag_line(&self, line: &str) -> bool {
         let trimmed = line.trim_end();
 
@@ -812,25 +813,50 @@ impl Parser {
             }
         }
 
-        // Check for self-closing tag /> or regular closing >
-        if trimmed.ends_with("/>") || trimmed.ends_with('>') {
-            // Must be a valid tag name between < and >
-            // Tag names start with letter and contain letters, digits, hyphens
-            let content = if trimmed.ends_with("/>") {
-                &trimmed[1..trimmed.len() - 2]
-            } else {
-                &trimmed[1..trimmed.len() - 1]
-            };
+        // Find the end of the first tag (either > or />)
+        let mut in_quotes = false;
+        let mut quote_char = ' ';
+        let mut tag_end = 0;
 
-            // For closing tags, skip the /
-            let tag_part = content.strip_prefix('/').unwrap_or(content);
+        for (i, ch) in trimmed.chars().enumerate() {
+            if i == 0 {
+                continue; // Skip the opening <
+            }
 
-            // Extract just the tag name (before space or other attributes)
-            if let Some(first_char) = tag_part.chars().next() {
-                // Tag name must start with ASCII letter
-                if first_char.is_ascii_alphabetic() {
-                    return true;
+            if in_quotes {
+                if ch == quote_char {
+                    in_quotes = false;
                 }
+            } else if ch == '"' || ch == '\'' {
+                in_quotes = true;
+                quote_char = ch;
+            } else if ch == '>' {
+                tag_end = i;
+                break;
+            }
+        }
+
+        if tag_end == 0 {
+            return false; // No closing >
+        }
+
+        // Check what comes after the tag - should be ONLY whitespace
+        let after_tag = &trimmed[tag_end + 1..];
+        if !after_tag.trim().is_empty() {
+            return false; // Content after tag means this is inline HTML, not a block
+        }
+
+        // Validate the tag itself
+        let tag_content = &trimmed[1..tag_end];
+
+        // For closing tags, skip the /
+        let tag_part = tag_content.strip_prefix('/').unwrap_or(tag_content);
+
+        // Extract just the tag name (before space or other attributes)
+        if let Some(first_char) = tag_part.chars().next() {
+            // Tag name must start with ASCII letter
+            if first_char.is_ascii_alphabetic() {
+                return true;
             }
         }
 
