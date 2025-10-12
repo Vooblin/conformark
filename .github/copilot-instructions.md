@@ -4,25 +4,25 @@
 
 ## 60-Second Quick Start
 
-**What**: CommonMark v0.31.2 parser in Rust (edition 2024). Three-file core: `ast.rs` (49 lines), `parser.rs` (3,710 lines), `renderer.rs` (206 lines).
+**What**: CommonMark v0.31.2 parser in Rust (edition 2024). Three-file core: `ast.rs` (49 lines), `parser.rs` (3,739 lines), `renderer.rs` (206 lines).
 
 **Add features**: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
 **Critical**: Parser order matters! `src/parser.rs` checks block types in specific sequence to avoid false positives (link refs → ATX headings → thematic breaks → blockquotes → HTML → lists → fenced code → indented code → setext headings → paragraphs).
 
-**Test-driven**: 655 spec tests in `tests/data/tests.json`. Current: 81.1% coverage (531/655 passing). Non-failing tests track progress intentionally.
+**Test-driven**: 655 spec tests in `tests/data/tests.json`. Current: 82.0% coverage (537/655 passing). Non-failing tests track progress intentionally.
 
-**Main gaps (124 failing tests)**: Link reference definitions in special contexts (multiline labels, inside blockquotes, paragraph interruption), complex link scenarios, nested list indentation tracking. Top test sections: Emphasis (132 tests), Links (90), List items (48).
+**Main gaps (118 failing tests)**: Link reference definitions in special contexts (multiline labels, inside blockquotes, paragraph interruption), complex link scenarios, nested list indentation tracking. Top test sections: Emphasis (132 tests), Links (90), List items (48).
 
-**Key resources**: `assets/spec.txt` (9,811 line authoritative spec), `tests/data/tests.json` (all 655 test cases), `examples/test_*.rs` (focused test runners).
+**Key resources**: `assets/spec.txt` (9,811 line authoritative spec), `tests/data/tests.json` (all 655 test cases), `examples/test_*.rs` (focused test runners: test_emphasis, test_html_blocks, test_link_refs, test_hard_breaks, test_169).
 
 ## Essential Workflows
 
-**Run tests with details**: `cargo test -- --nocapture` shows first 5 failures with diffs + coverage %. Currently: 531/655 passing (81.1%).
+**Run tests with details**: `cargo test -- --nocapture` shows first 5 failures with diffs + coverage %. Currently: 537/655 passing (82.0%).
 
 **Fast iteration**: `cargo test --lib -- --nocapture` runs just library tests (skips doc tests).
 
-**Debug specific sections**: `cargo run --example test_emphasis` runs just emphasis tests (132 cases) - faster iteration. Available: `test_html_blocks`, `test_link_refs`, `test_169`.
+**Debug specific sections**: `cargo run --example test_emphasis` runs just emphasis tests (132 cases) - faster iteration. Available: `test_html_blocks`, `test_link_refs`, `test_hard_breaks`, `test_169`.
 
 **Query tests**: `jq '.[] | select(.section == "Links")' tests/data/tests.json` finds specific test cases. `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn` shows sections by test count.
 
@@ -62,7 +62,7 @@
 
 **Three-file core**:
 - `src/ast.rs` (49 lines): 18 `Node` enum variants - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists (Unordered/Ordered/ListItem), Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `src/parser.rs` (3,710 lines): Stateful parser with `HashMap` for link references, **two-phase parsing**: (1) collect link reference definitions, (2) parse blocks with inline content
+- `src/parser.rs` (3,739 lines): Stateful parser with `HashMap` for link references, **two-phase parsing**: (1) collect link reference definitions, (2) parse blocks with inline content
 - `src/renderer.rs` (206 lines): Recursive pattern matching on `Node`, HTML escaping, tight/loose list logic
 
 **API & CLI**:
@@ -72,7 +72,7 @@
 **Test infrastructure**:
 - `tests/spec_tests.rs`: Loads 655 JSON test cases, reports first 5 failures with diffs, non-failing (tracks progress)
 - `tests/data/tests.json`: 655 CommonMark v0.31.2 examples with `{markdown, html, example, section}`
-- `examples/test_*.rs`: Focused test runners for rapid iteration (test_emphasis, test_html_blocks, test_link_refs, test_169)
+- `examples/test_*.rs`: Focused test runners for rapid iteration (test_emphasis, test_html_blocks, test_link_refs, test_hard_breaks, test_169)
 
 **Critical: Parser Order** (`src/parser.rs` main loop):
 The order of checks in `parse()` prevents false positives:
@@ -112,6 +112,7 @@ cat README.md | cargo run > output.html  # Convert file to HTML
 cargo run --example test_emphasis        # Just emphasis tests (132 tests)
 cargo run --example test_html_blocks     # Just HTML blocks (46 tests)
 cargo run --example test_link_refs       # Just link references (27 tests)
+cargo run --example test_hard_breaks     # Just hard line breaks (15 tests)
 cargo run --example test_169             # Single test case
 
 # Pattern: Copy examples/test_emphasis.rs, change .section filter
@@ -291,6 +292,7 @@ examples/
   test_emphasis.rs    # Focused test runner for emphasis (132 tests)
   test_html_blocks.rs # Focused test runner for HTML blocks (46 tests)
   test_link_refs.rs   # Focused test runner for link references (27 tests)
+  test_hard_breaks.rs # Focused test runner for hard line breaks (15 tests)
   test_169.rs         # Single test case runner (useful for debugging)
 
 assets/
@@ -372,7 +374,7 @@ src/
 ## Common Pitfalls & Troubleshooting
 
 **Common Test Failure Patterns:**
-The majority of current failures (133/655 tests) fall into these categories:
+The majority of current failures (118/655 tests) fall into these categories:
 1. **Link reference definitions**: Multiline titles, angle bracket handling, whitespace normalization (27 tests total)
 2. **Link edge cases**: Complex link scenarios, reference definitions, URL encoding (90 tests total)
 3. **List items**: Nested lists with proper indentation tracking (48 tests total)
