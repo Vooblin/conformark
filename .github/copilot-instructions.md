@@ -1,6 +1,16 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 83.4% spec compliance (546/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 84.0% spec compliance (550/655 tests passing).
+
+## Quick Start (First 60 Seconds)
+
+```bash
+cargo test -- --nocapture     # See test results + coverage (84.0%)
+echo "**bold**" | cargo run   # Test CLI parser
+cargo run --example test_emphasis  # Run 132 emphasis tests only
+```
+
+**Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
 
 ## Architecture (5-File Core)
 
@@ -14,7 +24,9 @@ A CommonMark v0.31.2 parser in Rust (edition 2024) with 83.4% spec compliance (5
 - `src/lib.rs` (65 lines): Public API `markdown_to_html(&str) -> String` + 6 unit tests for edge cases (entities, images, autolinks).
 - `src/main.rs` (11 lines): CLI tool that reads stdin → outputs HTML.
 
-**Quick Start**: `echo "**bold**" | cargo run` or `cargo test -- --nocapture` to see test results with diffs and coverage (currently 83.4%).
+**Note**: Uses Rust edition 2024 (cutting edge). Line counts approximate and may drift with development.
+
+**Quick Start**: `echo "**bold**" | cargo run` or `cargo test -- --nocapture` to see test results with diffs and coverage (currently 84.0%).
 
 ## Critical Parser Order (src/parser.rs lines 147-400)
 
@@ -64,7 +76,7 @@ After phase 1 collects link references, the `parse()` method checks blocks in th
 
 ## Essential Workflows
 
-**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 10 failures with example numbers + diffs + 83.4% coverage)
+**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 10 failures with example numbers + diffs + 84.0% coverage)
 
 **Fast iteration on specific sections** (bypass full test suite): 
 ```bash
@@ -121,12 +133,12 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs expand to **next multiple of 4** (NOT fixed 4 spaces). Partial tab removal in `remove_code_indent()` adds padding spaces.
 
-## Current Test Coverage (546/655 passing - 83.4%)
+## Current Test Coverage (550/655 passing - 84.0%)
 
-**Top failing sections** (109 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
+**Top failing sections** (105 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
 - ~~Link reference definitions in special contexts (multiline titles, inside blockquotes, paragraph interruption)~~ ✅ **100% complete (27/27)**
 - ~~Block quotes (lazy continuation, empty lines, fenced code interaction)~~ ✅ **100% complete (25/25)**
-- List items: 40/48 complete (83.3%) - remaining issues: empty items, multi-paragraph items, lazy continuation
+- List items: 43/48 complete (89.6%) - remaining issues: empty items, blockquote interactions
 - Complex link scenarios (nested brackets, reference link edge cases)
 - Emphasis and strong emphasis: 88/132 complete (66.7%) - nested emphasis delimiter matching
 - Tab handling in nested contexts (blockquotes, lists, code blocks)
@@ -137,7 +149,9 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 - List items: 48 tests
 - HTML blocks: 46 tests
 
-**Test format** (`tests/data/tests.json`): 655 objects with `{markdown, html, example, start_line, end_line, section}`. Tests are non-failing (track progress, don't block CI).
+**Test format** (`tests/data/tests.json`): 655 objects with `{markdown, html, example, start_line, end_line, section}`. 
+
+**Test Philosophy**: Tests are **non-blocking tracking tests** - they report progress but never fail CI. This allows incremental development while maintaining visibility into spec compliance. See `tests/spec_tests.rs` line 63: tests always pass but output detailed statistics.
 
 ## Key Resources
 
