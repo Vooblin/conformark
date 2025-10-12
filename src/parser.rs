@@ -1317,16 +1317,33 @@ impl Parser {
                 items.push(item);
                 i += consumed;
 
-                // Check if there's a blank line before the next item
-                if i < lines.len() && lines[i].trim().is_empty() {
-                    has_blank_between_items = true;
-                }
-
                 // Item contains multiple blocks separated by blanks makes list loose
                 if item_has_multiple_blocks {
                     has_blank_between_items = true;
                 }
-            } else if i > 0 && lines[i].trim().is_empty() {
+
+                // Check for blank lines after this item
+                if i < lines.len() && lines[i].trim().is_empty() {
+                    // Count consecutive blank lines
+                    let mut j = i;
+                    while j < lines.len() && lines[j].trim().is_empty() {
+                        j += 1;
+                    }
+
+                    // If there's another list item after the blank lines, mark as loose
+                    if j < lines.len()
+                        && let Some(next_type) = self.is_list_start(lines[j])
+                        && list_type.is_compatible(&next_type)
+                    {
+                        has_blank_between_items = true;
+                        // Skip the blank lines and continue with the next item
+                        i = j;
+                        continue;
+                    }
+                    // If no compatible list item follows, the blank lines end the list
+                    break;
+                }
+            } else if lines[i].trim().is_empty() {
                 // Blank line - might continue or end the list
                 // Look ahead to see if there's a continuation
                 let mut j = i + 1;
@@ -1421,6 +1438,23 @@ impl Parser {
 
             // Blank line
             if line.trim().is_empty() {
+                // Look ahead to see if a list item follows the blank line(s)
+                let mut j = i + 1;
+                while j < lines.len() && lines[j].trim().is_empty() {
+                    j += 1;
+                }
+
+                // If there's a list item at the same or less indentation level after blanks, stop the item
+                if j < lines.len()
+                    && let Some(_next_list_type) = self.is_list_start(lines[j])
+                {
+                    let next_indent = self.count_indent_columns(lines[j]);
+                    if next_indent < content_indent {
+                        // List item is less indented - it's a sibling, stop this item
+                        break;
+                    }
+                }
+
                 has_blank = true;
                 last_line_was_blank = true;
                 item_lines.push(String::new());
