@@ -3274,43 +3274,76 @@ impl Parser {
             return None;
         }
 
-        // Find the label (link text within brackets), respecting escapes
-        let chars: Vec<char> = trimmed.chars().collect();
+        // Find the label (link text within brackets), which can span multiple lines
+        // Collect all text until we find the closing bracket or run out of lines
+        let mut label_text = String::new();
+        let mut current_line = 0;
+        let mut found_closing = false;
+        let mut after_closing = String::new();
+
+        // Start with first line after '['
+        let first_line_chars: Vec<char> = trimmed.chars().collect();
         let mut i = 1; // Start after '['
-        while i < chars.len() {
-            if chars[i] == '\\' && i + 1 < chars.len() {
-                // Skip escaped character
-                i += 2;
-            } else if chars[i] == ']' {
-                break;
+
+        while current_line < lines.len() {
+            let line_to_scan = if current_line == 0 {
+                &first_line_chars[i..]
             } else {
-                i += 1;
+                &lines[current_line].chars().collect::<Vec<char>>()[..]
+            };
+
+            let mut j = 0;
+            while j < line_to_scan.len() {
+                if line_to_scan[j] == '\\' && j + 1 < line_to_scan.len() {
+                    // Include escaped character in label
+                    label_text.push(line_to_scan[j]);
+                    label_text.push(line_to_scan[j + 1]);
+                    j += 2;
+                } else if line_to_scan[j] == ']' {
+                    // Found closing bracket
+                    found_closing = true;
+                    after_closing = line_to_scan[j + 1..].iter().collect();
+                    break;
+                } else {
+                    label_text.push(line_to_scan[j]);
+                    j += 1;
+                }
+            }
+
+            if found_closing {
+                break;
+            }
+
+            // Add newline to label if we're continuing to next line
+            if current_line == 0 {
+                // Move to next line
+                current_line += 1;
+                if current_line < lines.len() {
+                    label_text.push('\n');
+                }
+                i = 0; // Reset for next lines
+            } else {
+                current_line += 1;
+                if current_line < lines.len() {
+                    label_text.push('\n');
+                }
             }
         }
 
-        if i >= chars.len() || chars[i] != ']' {
-            return None; // No closing bracket
+        if !found_closing || label_text.is_empty() {
+            return None; // No closing bracket or empty label
         }
 
-        let label_end = i;
-        if label_end == 1 {
-            // Empty label
-            return None;
-        }
-
-        let raw_label: String = chars[1..label_end].iter().collect();
-        let label = Self::normalize_label(&raw_label);
+        let label = Self::normalize_label(&label_text);
 
         // After ], must have :
-        let after_label: String = chars[label_end + 1..].iter().collect();
-        if !after_label.starts_with(':') {
+        if !after_closing.starts_with(':') {
             return None;
         }
 
-        let after_colon = after_label[1..].trim_start();
+        let after_colon = after_closing[1..].trim_start();
 
         // Parse destination (can span multiple lines)
-        let mut current_line = 0;
         let mut remaining = after_colon;
 
         // If nothing after colon on first line, check next line
