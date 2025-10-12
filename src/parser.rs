@@ -3182,16 +3182,13 @@ impl Parser {
             remaining = lines[current_line].trim_start();
         }
 
-        // Try to parse optional title
+        // Try to parse optional title (can span multiple lines)
         let title = if !remaining.is_empty() {
-            if let Some((title_text, title_consumed)) = self.parse_link_title(remaining) {
-                remaining = remaining[title_consumed..].trim();
-
-                // After title, rest of line must be empty
-                if !remaining.is_empty() {
-                    return None;
-                }
-
+            if let Some((title_text, lines_for_title)) =
+                self.parse_multiline_link_title(&lines[current_line..], remaining)
+            {
+                // Title consumed the rest of current line plus potentially more lines
+                current_line += lines_for_title - 1; // -1 because we're already on the first line
                 Some(title_text)
             } else {
                 // Not a valid title, but that's ok - title is optional
@@ -3318,15 +3315,20 @@ impl Parser {
         }
     }
 
-    /// Parse a link title (for reference definitions)
-    /// Returns (title, byte_offset) or None
-    fn parse_link_title(&self, text: &str) -> Option<(String, usize)> {
-        if text.is_empty() {
+    /// Parse a link title that can span multiple lines (for reference definitions)
+    /// Returns (title, lines_consumed) or None
+    /// `lines` is the array of remaining lines, `first_line_remaining` is what's left on the current line
+    fn parse_multiline_link_title(
+        &self,
+        lines: &[&str],
+        first_line_remaining: &str,
+    ) -> Option<(String, usize)> {
+        if lines.is_empty() || first_line_remaining.is_empty() {
             return None;
         }
 
-        let chars: Vec<char> = text.chars().collect();
-        let delimiter = chars[0];
+        let first_chars: Vec<char> = first_line_remaining.chars().collect();
+        let delimiter = first_chars[0];
 
         let closing_delimiter = match delimiter {
             '"' => '"',
@@ -3335,32 +3337,60 @@ impl Parser {
             _ => return None,
         };
 
-        let mut i = 1;
         let mut title = String::new();
+        let mut line_idx = 0;
+        let mut char_idx = 1; // Start after opening delimiter
 
-        while i < chars.len() {
-            match chars[i] {
+        // Process first line
+        let mut current_line_chars: Vec<char> = first_chars.clone();
+
+        loop {
+            if char_idx >= current_line_chars.len() {
+                // Reached end of current line
+                if line_idx + 1 >= lines.len() {
+                    // No more lines, title is not closed
+                    return None;
+                }
+
+                // Check if next line is blank - titles cannot contain blank lines
+                if lines[line_idx + 1].trim().is_empty() {
+                    return None;
+                }
+
+                // Move to next line - titles can contain newlines
+                title.push('\n');
+                line_idx += 1;
+                current_line_chars = lines[line_idx].chars().collect();
+                char_idx = 0;
+                continue;
+            }
+
+            match current_line_chars[char_idx] {
                 ch if ch == closing_delimiter => {
+                    // Found closing delimiter
+                    // Check that rest of line is whitespace only
+                    let rest: String = current_line_chars[char_idx + 1..].iter().collect();
+                    if !rest.trim().is_empty() {
+                        return None; // Content after closing delimiter
+                    }
+
                     // Decode entities in title
                     let entity_decoded = self.process_entities(&title);
-                    // Calculate byte offset
-                    let byte_offset = chars[..=i].iter().map(|c| c.len_utf8()).sum();
-                    return Some((entity_decoded, byte_offset));
+                    return Some((entity_decoded, line_idx + 1));
                 }
-                '\\' if i + 1 < chars.len() && self.is_ascii_punctuation(chars[i + 1]) => {
+                '\\' if char_idx + 1 < current_line_chars.len()
+                    && self.is_ascii_punctuation(current_line_chars[char_idx + 1]) =>
+                {
                     // Backslash escape of ASCII punctuation
-                    title.push(chars[i + 1]);
-                    i += 2;
+                    title.push(current_line_chars[char_idx + 1]);
+                    char_idx += 2;
                 }
                 ch => {
                     title.push(ch);
-                    i += 1;
+                    char_idx += 1;
                 }
             }
         }
-
-        // No closing delimiter found
-        None
     }
 
     /// Try to parse raw HTML inline

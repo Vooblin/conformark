@@ -1,59 +1,74 @@
 # Copilot Instructions for Conformark
 
+> **Note**: This file is intentionally comprehensive (~460 lines) due to the complexity of CommonMark parsing. The 60-second quick start and essential workflows provide immediate productivity; detailed sections support deep work.
+
 ## 60-Second Quick Start
 
-**TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
+**What**: CommonMark v0.31.2 parser in Rust (edition 2024). Three-file core: `ast.rs` (49 lines), `parser.rs` (3,659 lines), `renderer.rs` (206 lines).
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,658 lines - order matters!).
+**Add features**: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Current coverage**: 79.7% (522/655 tests passing - updated Oct 2025)
+**Critical**: Parser order matters! `src/parser.rs` checks block types in specific sequence to avoid false positives (link refs → ATX headings → thematic breaks → blockquotes → HTML → lists → fenced code → indented code → setext headings → paragraphs).
 
-**Parser method patterns discovered (20+ methods):**
-- Predicate methods: `is_indented_code_line`, `is_fenced_code_start`, `is_thematic_break`, `is_blockquote_start`, `is_html_block_start`, `is_list_start`, `is_setext_underline`, `is_closing_fence`, `is_complete_tag_line`, `is_ascii_punctuation`
-- Parse methods: `parse_indented_code_block`, `parse_fenced_code_block`, `parse_atx_heading`, `parse_blockquote`, `parse_html_block`, `parse_setext_heading`, `parse_list`, `parse_list_item`, `parse_paragraph`, `parse_inline`
-- Helper methods: `count_indent_columns`, `remove_code_indent`, `try_parse_link_reference_definition`
+**Test-driven**: 655 spec tests in `tests/data/tests.json`. Current: 79.7% coverage (522/655 passing - Oct 2025). Non-failing tests track progress intentionally.
 
-**Current status**: 79.7% coverage (522/655 tests passing). Main gaps: link reference edge cases (multiline titles, angle bracket handling), link edge cases (complex scenarios, URL encoding), list item nesting with proper indentation tracking.
+**Main gaps**: Link reference edge cases (multiline titles, angle brackets), complex link scenarios, nested list indentation tracking.
 
-## Quick Start for AI Agents
+**Key resources**: `assets/spec.txt` (9,811 line authoritative spec), `tests/data/tests.json` (all 655 test cases), `examples/test_*.rs` (focused test runners).
 
-**Before writing code:**
-1. Run `cargo test -- --nocapture` to see current coverage and failure examples
-2. Search test cases: `jq '.[] | select(.section == "Your Topic")' tests/data/tests.json`
-3. Count section tests: `jq '[.[] | select(.section == "Your Topic")] | length' tests/data/tests.json`
-4. Read `assets/spec.txt` for authoritative CommonMark v0.31.2 rules
+## Essential Workflows
 
-**To add a feature:**
-1. Add `Node` variant to `src/ast.rs` (e.g., `Emphasis(Vec<Node>)`)
-2. Implement parsing in `src/parser.rs`:
-   - Add `is_*` predicate method (returns bool or Option)
-   - Add `parse_*` method returning `(Node, usize)` where usize = lines consumed
-   - Insert check in main `parse()` loop **in correct order** (see "Critical: Parser Order")
-3. Add rendering in `src/renderer.rs` (pattern match on new node variant)
-4. Verify: `cargo test -- --nocapture` shows increased pass count
-5. CI checks: `cargo fmt --check && cargo clippy && cargo doc`
+**Run tests with details**: `cargo test -- --nocapture` shows first 5 failures with diffs + coverage %.
 
-## Project Architecture
+**Debug specific sections**: `cargo run --example test_emphasis` runs just emphasis tests (132 cases) - faster iteration. Available: `test_html_blocks`, `test_link_refs`, `test_169`.
 
-**Three-file core** (`src/ast.rs`, `src/parser.rs`, `src/renderer.rs`):
-- `ast.rs`: 18 `Node` enum variants with serde derives - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline) - 49 lines
-- `parser.rs`: 3,658 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
-- `renderer.rs`: 206 lines, recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
+**Query tests**: `jq '.[] | select(.section == "Links")' tests/data/tests.json` finds specific test cases. `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn` shows sections by test count.
 
-**Public API** (`src/lib.rs`, 64 lines): Single function `markdown_to_html(&str) -> String`
+**CI requirements**: `cargo fmt --check && cargo clippy && cargo doc` - all must pass before commit.
 
-**Binary CLI** (`src/main.rs`): Reads markdown from stdin, outputs HTML to stdout
-```bash
-echo "# Hello" | cargo run
-cat README.md | cargo run > output.html
-```
+**CLI usage**: `echo "# Hello" | cargo run` parses stdin to HTML stdout.
 
-**Test Infrastructure** (`tests/spec_tests.rs`):
-- Loads 655 JSON test cases from `tests/data/tests.json` (CommonMark v0.31.2)
-- **Non-failing test** - tracks progress, prints first 5 failures with diffs (intentional during development)
-- Each test: `{markdown, html, example, start_line, end_line, section}`
-- Run with `--nocapture` to see detailed output
-- Output format: Shows ❌ for failures with input/expected/got, then 📊 summary with coverage %
+## Adding a Feature (3-Step Pattern)
+
+**Example: Adding a new inline element**
+
+1. **AST** (`src/ast.rs`): Add enum variant
+   ```rust
+   pub enum Node {
+       // ... existing
+       Strikethrough(Vec<Node>),  // ~~text~~
+   }
+   ```
+
+2. **Parser** (`src/parser.rs`): Add to inline parsing logic
+   ```rust
+   fn is_strikethrough_delimiter(&self, chars: &[char], pos: usize) -> bool { ... }
+   fn try_parse_strikethrough(&self, chars: &[char], start: usize) -> Option<(Node, usize)> { ... }
+   // Insert check in parse_inline() in the correct order
+   ```
+
+3. **Renderer** (`src/renderer.rs`): Add pattern match
+   ```rust
+   Node::Strikethrough(children) => format!("<del>{}</del>", render_children(children))
+   ```
+
+**Verify**: `cargo test -- --nocapture` shows increased coverage. Check specific section with `cargo run --example test_your_section`.
+
+## Architecture & Key Files
+
+**Three-file core**:
+- `src/ast.rs` (49 lines): 18 `Node` enum variants - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists (Unordered/Ordered/ListItem), Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
+- `src/parser.rs` (3,659 lines): Stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
+- `src/renderer.rs` (206 lines): Recursive pattern matching on `Node`, HTML escaping, tight/loose list logic
+
+**API & CLI**:
+- `src/lib.rs` (64 lines): Single public function `markdown_to_html(&str) -> String`
+- `src/main.rs` (11 lines): CLI reads stdin, outputs HTML to stdout
+
+**Test infrastructure**:
+- `tests/spec_tests.rs`: Loads 655 JSON test cases, reports first 5 failures with diffs, non-failing (tracks progress)
+- `tests/data/tests.json`: 655 CommonMark v0.31.2 examples with `{markdown, html, example, section}`
+- `examples/test_*.rs`: Focused test runners for rapid iteration (test_emphasis, test_html_blocks, test_link_refs, test_169)
 
 **Critical: Parser Order** (`src/parser.rs` main loop):
 The order of checks in `parse()` prevents false positives:
