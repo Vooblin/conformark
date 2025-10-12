@@ -592,6 +592,7 @@ impl Parser {
         let mut quote_lines = Vec::new();
         let mut i = 0;
         let mut had_lazy = false;
+        let mut last_line_allows_lazy = false;
 
         while i < lines.len() {
             let line = lines[i];
@@ -600,10 +601,29 @@ impl Parser {
             if self.is_blockquote_start(line) {
                 // Strip the blockquote marker and add to quote lines
                 let stripped = self.strip_blockquote_marker(line);
-                quote_lines.push(stripped);
+
+                quote_lines.push(stripped.clone());
                 had_lazy = false; // Reset lazy flag when we see explicit marker
+
+                // Check if this line would allow lazy continuation
+                // Blank lines don't allow lazy continuation (end paragraphs)
+                // Lists, code blocks, etc. don't allow lazy continuation
+                // Only paragraphs (and similar inline content) allow it
+                last_line_allows_lazy = !stripped.trim().is_empty()
+                    && !self.is_indented_code_line(&stripped)
+                    && self.is_list_start(&stripped).is_none()
+                    && self.is_fenced_code_start(&stripped).is_none()
+                    && !self.is_thematic_break(&stripped)
+                    && self.parse_atx_heading(&stripped).is_none()
+                    && self.is_html_block_start(&stripped).is_none();
+
                 i += 1;
             } else if !line.trim().is_empty() {
+                // Lazy continuation is only possible if the last line allows it
+                if !last_line_allows_lazy {
+                    break;
+                }
+
                 // Check for lazy continuation
                 // A non-empty line without > can continue if it's not a new block structure
                 if self.can_lazy_continue(line) {
@@ -625,6 +645,8 @@ impl Parser {
                     };
                     quote_lines.push(line_to_add);
                     had_lazy = true;
+                    // Lazy lines continue to allow more lazy lines (paragraph continues)
+                    last_line_allows_lazy = true;
                     i += 1;
                 } else {
                     // This starts a new block, stop the blockquote
@@ -714,13 +736,15 @@ impl Parser {
 
     /// Check if a line can continue a blockquote via lazy continuation
     fn can_lazy_continue(&self, line: &str) -> bool {
-        // Lines that start new block structures cannot lazy continue
-        // Check for common block starters
+        // According to CommonMark spec, lazy continuation lines can contain
+        // almost anything that would normally be part of a paragraph.
+        // The key exceptions are:
+        // 1. Thematic breaks (always start new blocks)
+        // 2. ATX headings (always start new blocks)
+        // 3. Fenced code blocks (need explicit markers)
 
-        // 4+ spaces = code block
-        if self.is_indented_code_line(line) {
-            return false;
-        }
+        // However, indented content and list markers CAN lazy-continue
+        // because they could be literal text in a paragraph context.
 
         // Thematic break
         if self.is_thematic_break(line) {
@@ -732,17 +756,17 @@ impl Parser {
             return false;
         }
 
-        // Fenced code block
+        // Fenced code block - these need explicit blockquote markers
         if self.is_fenced_code_start(line).is_some() {
             return false;
         }
 
-        // List items cannot lazy continue
-        if self.is_list_start(line).is_some() {
+        // HTML blocks - these interrupt paragraphs
+        if self.is_html_block_start(line).is_some() {
             return false;
         }
 
-        // Otherwise, can lazy continue
+        // Otherwise, can lazy continue (including indented code and list markers)
         true
     }
 
