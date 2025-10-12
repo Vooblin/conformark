@@ -1268,6 +1268,18 @@ impl Parser {
         None
     }
 
+    /// Check if a line is an empty list item (marker with no content after it)
+    /// Per CommonMark spec: empty list items cannot interrupt paragraphs
+    fn is_empty_list_item(&self, line: &str) -> bool {
+        if let Some(list_type) = self.is_list_start(line) {
+            // Check if there's any non-whitespace content after the marker
+            let content = self.extract_list_item_content(line, &list_type);
+            content.trim().is_empty()
+        } else {
+            false
+        }
+    }
+
     /// Parse a list (collecting consecutive items with same marker type)
     fn parse_list(&mut self, lines: &[&str], list_type: ListType) -> (Node, usize) {
         let mut items = Vec::new();
@@ -1829,8 +1841,8 @@ impl Parser {
                 break;
             }
 
-            // Stop on list
-            if self.is_list_start(line).is_some() {
+            // Stop on list - but empty list items cannot interrupt paragraphs
+            if self.is_list_start(line).is_some() && !self.is_empty_list_item(line) {
                 break;
             }
 

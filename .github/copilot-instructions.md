@@ -15,13 +15,13 @@ cargo run --example test_emphasis  # Run 132 emphasis tests only
 ## Architecture (5-File Core)
 
 - `src/ast.rs` (49 lines): Single `Node` enum with 18 variants representing the AST. All nodes are serializable via serde.
-- `src/parser.rs` (3,904 lines): **Two-phase parsing architecture** with 43 methods
+- `src/parser.rs` (3,928 lines): **Two-phase parsing architecture** with 44 methods
   - **Phase 1 (lines 17-146)**: Scan entire input to collect link reference definitions into `HashMap<String, (String, Option<String>)>`. Skips fenced/indented code blocks and recursively checks blockquotes where link refs can/can't appear.
   - **Phase 2 (lines 147+)**: Parse blocks in critical order (see below), using collected references for inline link resolution.
   - `Parser` struct holds only `reference_definitions` HashMap - stateless for each `parse()` call.
   - **Naming convention**: `is_*` predicates, `parse_*` block parsers (return `(Node, usize)`), `try_parse_*` inline parsers (return `Option<(Node, usize)>`)
 - `src/renderer.rs` (206 lines): Recursive pattern matching on `Node` → HTML with proper escaping. All block elements output trailing `\n`.
-- `src/lib.rs` (65 lines): Public API `markdown_to_html(&str) -> String` + 6 unit tests for edge cases (entities, images, autolinks).
+- `src/lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String` + 6 unit tests for edge cases (entities, images, autolinks).
 - `src/main.rs` (11 lines): CLI tool that reads stdin → outputs HTML.
 
 **Note**: Uses Rust edition 2024 (cutting edge). Line counts approximate and may drift with development.
@@ -83,7 +83,10 @@ After phase 1 collects link references, the `parse()` method checks blocks in th
 cargo run --example test_emphasis      # 132 emphasis tests only
 cargo run --example test_html_blocks   # 46 HTML block tests
 cargo run --example test_link_refs     # 27 link reference tests
-# Pattern: Copy examples/test_emphasis.rs, change .section filter
+cargo run --example test_blockquotes   # 25 blockquote tests
+cargo run --example test_list_items    # 48 list item tests
+cargo run --example test_hard_breaks   # 15 hard line break tests
+# Pattern: Copy examples/test_emphasis.rs, change .section filter to target specific section
 ```
 
 **Query test data** (requires `jq`):
@@ -107,10 +110,10 @@ jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn  # Count b
 
 ## Implementation Patterns
 
-**Parser method naming convention** (43 methods total - use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all):
-- `is_*` (20 methods): Predicate methods check if line/position matches pattern, return `bool` or `Option<T>`
+**Parser method naming convention** (44 methods total - use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all):
+- `is_*` (17 methods): Predicate methods check if line/position matches pattern, return `bool` or `Option<T>`
   - Examples: `is_indented_code_line()`, `is_thematic_break()`, `is_blockquote_start()`
-- `parse_*` (15 methods): Consume input, return `(Node, usize)` where `usize` = lines/chars consumed
+- `parse_*` (13 methods): Consume input, return `(Node, usize)` where `usize` = lines/chars consumed
   - Examples: `parse_paragraph()`, `parse_blockquote()`, `parse_list()`
 - `try_parse_*` (14 methods): Optional parsing for inline elements, return `Option<(Node, usize)>`
   - Examples: `try_parse_link()`, `try_parse_code_span()`, `try_parse_autolink()`
