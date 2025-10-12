@@ -1699,15 +1699,21 @@ impl Parser {
         // Join lines with newlines and parse inline content
         // Per CommonMark spec: "The paragraph's raw content is formed by concatenating
         // the lines and removing initial and final spaces or tabs."
-        // This means trimming each line, then joining with newlines
-        let trimmed_lines: Vec<&str> = paragraph_lines
+        // However, we must preserve trailing spaces for hard line breaks (2+ spaces before newline)
+        let mut processed_lines: Vec<String> = paragraph_lines
             .iter()
             .map(|&line: &&str| {
-                line.trim_start_matches([' ', '\t'])
-                    .trim_end_matches([' ', '\t'])
+                // Trim start only, preserve trailing spaces for hard breaks
+                line.trim_start_matches([' ', '\t']).to_string()
             })
             .collect();
-        let text = trimmed_lines.join("\n");
+
+        // Trim trailing spaces from the last line (end of paragraph)
+        if let Some(last) = processed_lines.last_mut() {
+            *last = last.trim_end_matches([' ', '\t']).to_string();
+        }
+
+        let text = processed_lines.join("\n");
         let children = self.parse_inline(&text);
 
         (Node::Paragraph(children), i)
@@ -1834,11 +1840,34 @@ impl Parser {
                 && chars[i] != '['
                 && chars[i] != '!'
                 && chars[i] != '<'
+                && chars[i] != '\n'
             {
                 i += 1;
             }
             if i > text_start {
-                nodes.push(Node::Text(chars[text_start..i].iter().collect()));
+                let text: String = chars[text_start..i].iter().collect();
+                // Check for hard line break: 2+ trailing spaces before newline
+                if i < end && chars[i] == '\n' {
+                    let trimmed_end = text.trim_end_matches(' ').len();
+                    let trailing_spaces = text.len() - trimmed_end;
+                    if trailing_spaces >= 2 {
+                        // Hard line break - emit text without trailing spaces, then <br />
+                        if trimmed_end > 0 {
+                            nodes.push(Node::Text(text[..trimmed_end].to_string()));
+                        }
+                        nodes.push(Node::HardBreak);
+                        i += 1; // consume the newline
+                        continue;
+                    } else {
+                        // Normal text with newline - include the newline in text
+                        nodes.push(Node::Text(text));
+                        nodes.push(Node::Text("\n".to_string()));
+                        i += 1;
+                        continue;
+                    }
+                } else {
+                    nodes.push(Node::Text(text));
+                }
             }
 
             // If we didn't move forward, just consume one character as text
