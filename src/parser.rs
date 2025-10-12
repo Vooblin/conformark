@@ -2,6 +2,17 @@
 use crate::ast::Node;
 use std::collections::HashMap;
 
+/// Delimiter run on the stack for emphasis processing
+#[derive(Debug, Clone)]
+struct DelimiterRun {
+    delimiter: char,
+    count: usize,
+    pos: usize, // Position in nodes vec
+    can_open: bool,
+    can_close: bool,
+    active: bool,
+}
+
 pub struct Parser {
     /// Link reference definitions: label -> (destination, title)
     reference_definitions: HashMap<String, (String, Option<String>)>,
@@ -1891,14 +1902,21 @@ impl Parser {
     /// Uses a delimiter-based approach for emphasis per CommonMark spec
     fn parse_inline(&self, text: &str) -> Vec<Node> {
         let chars: Vec<char> = text.chars().collect();
-        self.parse_inline_with_delimiters(&chars, 0, chars.len())
+        self.parse_inline_with_delimiter_stack(&chars, 0, chars.len())
     }
 
-    /// Parse inline elements with proper delimiter handling
-    fn parse_inline_with_delimiters(&self, chars: &[char], start: usize, end: usize) -> Vec<Node> {
+    /// Parse inline elements with proper delimiter stack algorithm per CommonMark spec
+    fn parse_inline_with_delimiter_stack(
+        &self,
+        chars: &[char],
+        start: usize,
+        end: usize,
+    ) -> Vec<Node> {
         let mut nodes = Vec::new();
+        let mut delimiter_stack: Vec<DelimiterRun> = Vec::new();
         let mut i = start;
 
+        // First pass: collect all inline elements and delimiter runs
         while i < end {
             // Handle backslash escapes first
             if chars[i] == '\\' && i + 1 < end {
@@ -1931,7 +1949,7 @@ impl Parser {
                 continue;
             }
 
-            // Try to parse code span first (takes precedence over emphasis)
+            // Try to parse code span first (takes precedence over emphasis per Rule 17)
             if chars[i] == '`'
                 && let Some((code_node, new_i)) = self.try_parse_code_span(chars, i)
             {
@@ -1978,23 +1996,59 @@ impl Parser {
                 continue;
             }
 
-            // Try to parse emphasis/strong with delimiter stack algorithm
+            // Handle emphasis delimiters - add to stack
             if chars[i] == '*' || chars[i] == '_' {
-                if let Some((emph_node, new_i)) = self.try_parse_emphasis_delimiters(chars, i, end)
-                {
-                    nodes.push(emph_node);
-                    i = new_i;
-                    continue;
-                } else {
-                    // Can't open emphasis - consume the entire delimiter run as text
-                    let delim_start = i;
-                    let delimiter = chars[i];
-                    while i < end && chars[i] == delimiter {
-                        i += 1;
-                    }
-                    nodes.push(Node::Text(chars[delim_start..i].iter().collect()));
-                    continue;
+                let delimiter = chars[i];
+                let delim_start = i;
+                let mut count = 0;
+                while i < end && chars[i] == delimiter {
+                    count += 1;
+                    i += 1;
                 }
+
+                // Check flanking rules
+                let is_left_flanking = self.is_left_flanking(chars, delim_start, count);
+                let is_right_flanking = self.is_right_flanking(chars, delim_start, count);
+
+                let can_open = if delimiter == '*' {
+                    is_left_flanking
+                } else {
+                    is_left_flanking
+                        && (!is_right_flanking || {
+                            let before_char = if delim_start == 0 {
+                                ' '
+                            } else {
+                                chars[delim_start - 1]
+                            };
+                            self.is_unicode_punctuation(before_char)
+                        })
+                };
+
+                let can_close = if delimiter == '*' {
+                    is_right_flanking
+                } else {
+                    is_right_flanking
+                        && (!is_left_flanking || {
+                            let after_char = if i >= end { ' ' } else { chars[i] };
+                            self.is_unicode_punctuation(after_char)
+                        })
+                };
+
+                // Add delimiter run to text nodes and track on stack
+                let delimiter_str: String = chars[delim_start..i].iter().collect();
+                nodes.push(Node::Text(delimiter_str));
+
+                if can_open || can_close {
+                    delimiter_stack.push(DelimiterRun {
+                        delimiter,
+                        count,
+                        pos: nodes.len() - 1,
+                        can_open,
+                        can_close,
+                        active: true,
+                    });
+                }
+                continue;
             }
 
             // Collect regular text until next special character
@@ -2045,7 +2099,198 @@ impl Parser {
             }
         }
 
+        // Second pass: process emphasis delimiters
+        self.process_emphasis(&mut nodes, &mut delimiter_stack, None);
+
         nodes
+    }
+
+    /// Process emphasis delimiters using the CommonMark algorithm
+    /// Modifies nodes in place, converting delimiter runs to emphasis/strong nodes
+    fn process_emphasis(
+        &self,
+        nodes: &mut Vec<Node>,
+        delimiter_stack: &mut Vec<DelimiterRun>,
+        stack_bottom: Option<usize>,
+    ) {
+        let bottom_index = stack_bottom.unwrap_or(0);
+        let mut closer_idx = bottom_index;
+
+        // Find potential closers
+        while closer_idx < delimiter_stack.len() {
+            let closer = &delimiter_stack[closer_idx];
+
+            // Skip if not a potential closer or not active
+            if !closer.can_close || !closer.active {
+                closer_idx += 1;
+                continue;
+            }
+
+            // Look for matching opener (go backwards from closer)
+            let mut opener_idx = closer_idx;
+            let mut found_opener = None;
+
+            while opener_idx > bottom_index {
+                opener_idx -= 1;
+                let opener = &delimiter_stack[opener_idx];
+
+                // Skip if wrong delimiter type, not active, or can't open
+                if opener.delimiter != closer.delimiter || !opener.active || !opener.can_open {
+                    continue;
+                }
+
+                // Check modulo-3 rule (Rule 9/10)
+                let both_can_open_and_close = opener.can_close && closer.can_open;
+                if both_can_open_and_close {
+                    let sum = opener.count + closer.count;
+                    if sum.is_multiple_of(3)
+                        && !(opener.count.is_multiple_of(3) && closer.count.is_multiple_of(3))
+                    {
+                        continue;
+                    }
+                }
+
+                // Found a match!
+                found_opener = Some(opener_idx);
+                break;
+            }
+
+            if let Some(opener_idx) = found_opener {
+                // Determine how many delimiters to use (prefer 2 for strong, else 1 for em)
+                let opener_count = delimiter_stack[opener_idx].count;
+                let closer_count = delimiter_stack[closer_idx].count;
+
+                let use_delims = if opener_count >= 2 && closer_count >= 2 {
+                    2 // strong
+                } else {
+                    1 // emphasis
+                };
+
+                // Extract content between opener and closer
+                let opener_pos = delimiter_stack[opener_idx].pos;
+                let closer_pos = delimiter_stack[closer_idx].pos;
+                let opener_count = delimiter_stack[opener_idx].count;
+                let closer_count = delimiter_stack[closer_idx].count;
+
+                // Remove delimiters from the text nodes and create emphasis node
+                let new_node = self.create_emphasis_node(nodes, opener_pos, closer_pos, use_delims);
+
+                // Replace the range with the new emphasis node
+                // This updates nodes and adjusts positions
+                self.replace_with_emphasis(
+                    nodes,
+                    delimiter_stack,
+                    (opener_pos, closer_pos),
+                    new_node,
+                    use_delims,
+                    (opener_count, closer_count),
+                );
+
+                // Update delimiter counts
+                delimiter_stack[opener_idx].count = opener_count.saturating_sub(use_delims);
+                delimiter_stack[closer_idx].count = closer_count.saturating_sub(use_delims);
+
+                // Remove exhausted delimiters and those between opener and closer
+                let mut to_remove = Vec::new();
+
+                // Collect indices to remove
+                if delimiter_stack[closer_idx].count == 0 {
+                    to_remove.push(closer_idx);
+                }
+                for idx in (opener_idx + 1..closer_idx).rev() {
+                    to_remove.push(idx);
+                }
+                if delimiter_stack[opener_idx].count == 0 {
+                    to_remove.push(opener_idx);
+                }
+
+                // Remove from highest to lowest index to avoid shifting issues
+                to_remove.sort_unstable_by(|a, b| b.cmp(a));
+                for &idx in &to_remove {
+                    delimiter_stack.remove(idx);
+                }
+
+                // Adjust closer_idx for next iteration
+                // Count how many items we removed that were before closer_idx
+                let removed_before = to_remove.iter().filter(|&&idx| idx < closer_idx).count();
+                closer_idx = closer_idx.saturating_sub(removed_before);
+
+                // Continue from the same position (might be a new closer now)
+                continue;
+            }
+
+            closer_idx += 1;
+        }
+    }
+
+    /// Create an emphasis or strong node from the content between two positions
+    fn create_emphasis_node(
+        &self,
+        nodes: &[Node],
+        opener_pos: usize,
+        closer_pos: usize,
+        use_delims: usize,
+    ) -> Node {
+        // Extract content between delimiters (excluding the delimiter text nodes themselves)
+        let mut content = Vec::new();
+        for node in nodes.iter().take(closer_pos).skip(opener_pos + 1) {
+            content.push(node.clone());
+        }
+
+        if use_delims == 2 {
+            Node::Strong(content)
+        } else {
+            Node::Emphasis(content)
+        }
+    }
+
+    /// Replace the delimiter range with an emphasis node
+    /// This updates the nodes vec and adjusts delimiter positions in the stack
+    fn replace_with_emphasis(
+        &self,
+        nodes: &mut Vec<Node>,
+        delimiter_stack: &mut [DelimiterRun],
+        positions: (usize, usize), // (opener_pos, closer_pos)
+        emphasis_node: Node,
+        use_delims: usize,
+        delimiter_counts: (usize, usize), // (opener_count, closer_count)
+    ) {
+        let (opener_pos, closer_pos) = positions;
+        let (opener_count, closer_count) = delimiter_counts;
+
+        // Update the delimiter text nodes to remove used delimiters
+        if let Node::Text(ref mut opener_text) = nodes[opener_pos] {
+            let delim_char = opener_text.chars().next().unwrap_or('*');
+            let remaining = opener_count.saturating_sub(use_delims);
+            *opener_text = delim_char.to_string().repeat(remaining);
+        }
+
+        if let Node::Text(ref mut closer_text) = nodes[closer_pos] {
+            let delim_char = closer_text.chars().next().unwrap_or('*');
+            let remaining = closer_count.saturating_sub(use_delims);
+            *closer_text = delim_char.to_string().repeat(remaining);
+        }
+
+        // Replace the content between opener and closer with the emphasis node
+        // First, remove the content range (excluding delimiters)
+        let remove_start = opener_pos + 1;
+        let remove_end = closer_pos;
+        let remove_count = remove_end - remove_start;
+
+        if remove_count > 0 {
+            nodes.drain(remove_start..remove_end);
+        }
+
+        // Insert the emphasis node
+        nodes.insert(remove_start, emphasis_node);
+
+        // Update all delimiter positions after the change
+        let pos_shift = 1_isize - remove_count as isize;
+        for delim in delimiter_stack.iter_mut() {
+            if delim.pos > opener_pos {
+                delim.pos = (delim.pos as isize + pos_shift) as usize;
+            }
+        }
     }
 
     /// Check if a character is ASCII punctuation (can be backslash-escaped)
@@ -2214,178 +2459,6 @@ impl Parser {
                 }
             } else {
                 j += 1;
-            }
-        }
-
-        None
-    }
-
-    /// Try to parse emphasis/strong using proper delimiter run algorithm
-    /// This implements the CommonMark spec Rules 1-17 for emphasis and strong emphasis
-    fn try_parse_emphasis_delimiters(
-        &self,
-        chars: &[char],
-        start: usize,
-        end: usize,
-    ) -> Option<(Node, usize)> {
-        let delimiter = chars[start];
-        let mut count = 0;
-        let mut i = start;
-
-        // Count consecutive delimiters
-        while i < end && chars[i] == delimiter {
-            count += 1;
-            i += 1;
-        }
-
-        // Check if this can open emphasis
-        let is_left_flanking = self.is_left_flanking(chars, start, count);
-        let is_right_flanking = self.is_right_flanking(chars, start, count);
-
-        let can_open = if delimiter == '*' {
-            // Rule 1, 5: * can open emphasis/strong iff left-flanking
-            is_left_flanking
-        } else {
-            // Rule 2, 6: _ can open emphasis/strong iff left-flanking AND
-            // (not right-flanking OR (right-flanking AND preceded by punctuation))
-            is_left_flanking
-                && (!is_right_flanking || {
-                    let before_char = if start == 0 { ' ' } else { chars[start - 1] };
-                    self.is_unicode_punctuation(before_char)
-                })
-        };
-
-        if !can_open {
-            return None;
-        }
-
-        // Find matching closer
-        if let Some((close_pos, delims_to_consume, used_delims)) =
-            self.find_emphasis_closer(chars, i, end, delimiter, count)
-        {
-            // Extract content between delimiters
-            let content_str: String = chars[i..close_pos].iter().collect();
-
-            // Recursively parse content
-            let children = if content_str.is_empty() {
-                vec![]
-            } else {
-                let content_chars: Vec<char> = content_str.chars().collect();
-                self.parse_inline_with_delimiters(&content_chars, 0, content_chars.len())
-            };
-
-            // Determine node type based on delimiter count used
-            let node = if used_delims == 2 {
-                Node::Strong(children)
-            } else {
-                Node::Emphasis(children)
-            };
-
-            // Position after the closing delimiters
-            let next_pos = close_pos + delims_to_consume;
-            Some((node, next_pos))
-        } else {
-            None
-        }
-    }
-
-    /// Find a matching emphasis closer according to CommonMark rules
-    /// Returns (position of closer, count of delimiters at closer, delimiters used)
-    fn find_emphasis_closer(
-        &self,
-        chars: &[char],
-        start: usize,
-        end: usize,
-        delimiter: char,
-        opener_count: usize,
-    ) -> Option<(usize, usize, usize)> {
-        let mut i = start;
-
-        while i < end {
-            // Skip over non-delimiter characters
-            if chars[i] != delimiter {
-                // Skip code spans, links, and HTML (they take precedence per Rule 17)
-                if chars[i] == '`' {
-                    if let Some((_, new_i)) = self.try_parse_code_span(chars, i) {
-                        i = new_i;
-                        continue;
-                    }
-                } else if chars[i] == '[' {
-                    if let Some((_, new_i)) = self.try_parse_link(chars, i) {
-                        i = new_i;
-                        continue;
-                    }
-                } else if chars[i] == '<' {
-                    if let Some((_, new_i)) = self.try_parse_autolink(chars, i) {
-                        i = new_i;
-                        continue;
-                    }
-                    if let Some((_, new_i)) = self.try_parse_html_inline(chars, i) {
-                        i = new_i;
-                        continue;
-                    }
-                }
-                i += 1;
-                continue;
-            }
-
-            // Found potential closer - count delimiters
-            let closer_start = i;
-            let mut closer_count = 0;
-            while i < end && chars[i] == delimiter {
-                closer_count += 1;
-                i += 1;
-            }
-
-            // Check if this can close emphasis
-            let is_left_flanking = self.is_left_flanking(chars, closer_start, closer_count);
-            let is_right_flanking = self.is_right_flanking(chars, closer_start, closer_count);
-
-            let can_close = if delimiter == '*' {
-                // Rule 3, 7: * can close emphasis/strong iff right-flanking
-                is_right_flanking
-            } else {
-                // Rule 4, 8: _ can close emphasis/strong iff right-flanking AND
-                // (not left-flanking OR (left-flanking AND followed by punctuation))
-                is_right_flanking
-                    && (!is_left_flanking || {
-                        let after_char = if i >= end { ' ' } else { chars[i] };
-                        self.is_unicode_punctuation(after_char)
-                    })
-            };
-
-            if !can_close {
-                continue;
-            }
-
-            // Check Rule 9/10: delimiter runs must be separate
-            // (opening and closing must not be the same run)
-            // This is ensured by having content between them
-
-            // Check modulo-3 rule (Rule 9/10)
-            // If both can open and close, sum of lengths must not be multiple of 3
-            // unless both lengths are multiples of 3
-            if is_left_flanking && is_right_flanking {
-                let sum = opener_count + closer_count;
-                if sum.is_multiple_of(3)
-                    && !(opener_count.is_multiple_of(3) && closer_count % 3 == 0)
-                {
-                    continue;
-                }
-            }
-
-            // Match emphasis according to Rules 13-16
-            // Rule 13: Minimize nesting - try strong (2 delims) before regular (1 delim)
-            // Rule 14: <em><strong> preferred over <strong><em>
-
-            // Try to use 2 delimiters for strong emphasis (if both have at least 2)
-            if opener_count >= 2 && closer_count >= 2 {
-                return Some((closer_start, 2, 2));
-            }
-
-            // Use 1 delimiter for regular emphasis
-            if opener_count >= 1 && closer_count >= 1 {
-                return Some((closer_start, 1, 1));
             }
         }
 
