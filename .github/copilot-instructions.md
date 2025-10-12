@@ -1,13 +1,13 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 82.4% spec compliance (540/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 83.2% spec compliance (545/655 tests passing).
 
 ## Architecture (3-File Core)
 
 - `src/ast.rs` (49 lines): 18 `Node` enum variants (Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `src/parser.rs` (3,890 lines): **Two-phase parsing architecture**
-  - **Phase 1 (lines 17-105)**: Scan entire input to collect link reference definitions into `HashMap<String, (String, Option<String>)>`, skipping fenced/indented code blocks where link refs can't appear
-  - **Phase 2 (lines 106+)**: Parse blocks in critical order, using collected references for inline link resolution
+- `src/parser.rs` (3,879 lines): **Two-phase parsing architecture**
+  - **Phase 1 (lines 17-110)**: Scan entire input to collect link reference definitions into `HashMap<String, (String, Option<String>)>`, skipping fenced/indented code blocks and recursively checking blockquotes where link refs can't/can appear
+  - **Phase 2 (lines 111+)**: Parse blocks in critical order, using collected references for inline link resolution
   - Contains 43 helper methods following `is_*`/`parse_*`/`try_parse_*` naming convention
   - `Parser` struct (line 5) holds only the `reference_definitions` HashMap - stateless for each parse call
 - `src/renderer.rs` (206 lines): Recursive pattern matching on `Node` → HTML with proper escaping
@@ -16,7 +16,7 @@ A CommonMark v0.31.2 parser in Rust (edition 2024) with 82.4% spec compliance (5
 
 **Quick Start**: `echo "**bold**" | cargo run` or `cargo test -- --nocapture` to see test results with diffs.
 
-## Critical Parser Order (src/parser.rs lines 106-400)
+## Critical Parser Order (src/parser.rs lines 111-400)
 
 After phase 1 collects link references, the `parse()` method checks blocks in this EXACT sequence to prevent misidentification:
 1. Link reference definitions (silent, don't produce blocks)
@@ -64,7 +64,7 @@ Reordering these causes cascading test failures.
 
 ## Essential Workflows
 
-**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 10 failures with example numbers + diffs + 82.4% coverage)
+**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 10 failures with example numbers + diffs + 83.2% coverage)
 
 **Fast iteration on specific sections** (bypass full test suite): 
 ```bash
@@ -118,10 +118,11 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs expand to next multiple of 4 (NOT fixed 4 spaces). Partial tab removal in `remove_code_indent()` adds padding spaces.
 
-## Current Test Coverage (540/655 passing - 82.4%)
+## Current Test Coverage (545/655 passing - 83.2%)
 
-**Top failing sections** (115 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
+**Top failing sections** (110 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
 - ~~Link reference definitions in special contexts (multiline titles, inside blockquotes, paragraph interruption)~~ ✅ **100% complete (27/27)**
+- ~~Block quotes (lazy continuation, empty lines, fenced code interaction)~~ ✅ **100% complete (25/25)**
 - Complex link scenarios (nested brackets, reference link edge cases)
 - Nested list indentation tracking
 - Tab handling in nested contexts (blockquotes, lists, code blocks)
