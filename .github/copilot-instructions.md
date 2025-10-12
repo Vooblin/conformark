@@ -4,7 +4,7 @@
 
 ## 60-Second Quick Start
 
-**What**: CommonMark v0.31.2 parser in Rust (edition 2024). Three-file core: `ast.rs` (49 lines), `parser.rs` (3,659 lines), `renderer.rs` (206 lines).
+**What**: CommonMark v0.31.2 parser in Rust (edition 2024). Three-file core: `ast.rs` (49 lines), `parser.rs` (3,710 lines), `renderer.rs` (206 lines).
 
 **Add features**: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
@@ -62,7 +62,7 @@
 
 **Three-file core**:
 - `src/ast.rs` (49 lines): 18 `Node` enum variants - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists (Unordered/Ordered/ListItem), Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `src/parser.rs` (3,659 lines): Stateful parser with `HashMap` for link references, **two-phase parsing**: (1) collect link reference definitions, (2) parse blocks with inline content
+- `src/parser.rs` (3,710 lines): Stateful parser with `HashMap` for link references, **two-phase parsing**: (1) collect link reference definitions, (2) parse blocks with inline content
 - `src/renderer.rs` (206 lines): Recursive pattern matching on `Node`, HTML escaping, tight/loose list logic
 
 **API & CLI**:
@@ -278,8 +278,8 @@ jq '.[] | select(.example == 123)' tests/data/tests.json
 src/
   lib.rs           # Public API: markdown_to_html() (64 lines)
   ast.rs           # Node enum (18 variants, 49 lines)
-  parser.rs        # Parser struct (3,562 lines)
-  renderer.rs      # HtmlRenderer with escape_html() (205 lines)
+  parser.rs        # Parser struct (3,710 lines)
+  renderer.rs      # HtmlRenderer with escape_html() (206 lines)
   main.rs          # Binary entry point (11 lines)
 
 tests/
