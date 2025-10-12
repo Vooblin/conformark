@@ -1852,9 +1852,21 @@ impl Parser {
                 break;
             }
 
-            // Stop on list - but empty list items cannot interrupt paragraphs
-            if self.is_list_start(line).is_some() && !self.is_empty_list_item(line) {
-                break;
+            // Stop on list - but with restrictions per CommonMark spec:
+            // - Empty list items cannot interrupt paragraphs
+            // - Ordered lists can only interrupt paragraphs if they start with 1
+            if let Some(list_type) = self.is_list_start(line)
+                && !self.is_empty_list_item(line)
+            {
+                match list_type {
+                    ListType::Unordered(_) => break,
+                    ListType::Ordered(start, _) => {
+                        if start == 1 {
+                            break;
+                        }
+                        // Ordered lists not starting with 1 cannot interrupt paragraphs
+                    }
+                }
             }
 
             // Stop on HTML block (types 1-6 can interrupt paragraphs, type 7 cannot)
