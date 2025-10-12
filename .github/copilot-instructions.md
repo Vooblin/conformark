@@ -4,9 +4,16 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,545 lines - order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,562 lines - order matters!).
 
-**Current status**: 75.7% coverage (496/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, remaining tab/indentation edge cases.
+**Current coverage**: 76.8% (503/655 tests passing)
+
+**Parser method patterns discovered (20+ methods):**
+- Predicate methods: `is_indented_code_line`, `is_fenced_code_start`, `is_thematic_break`, `is_blockquote_start`, `is_html_block_start`, `is_list_start`, `is_setext_underline`, `is_closing_fence`, `is_complete_tag_line`, `is_ascii_punctuation`
+- Parse methods: `parse_indented_code_block`, `parse_fenced_code_block`, `parse_atx_heading`, `parse_blockquote`, `parse_html_block`, `parse_setext_heading`, `parse_list`, `parse_list_item`, `parse_paragraph`, `parse_inline`
+- Helper methods: `count_indent_columns`, `remove_code_indent`, `try_parse_link_reference_definition`
+
+**Current status**: 76.8% coverage (503/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, remaining tab/indentation edge cases.
 
 ## Quick Start for AI Agents
 
@@ -30,7 +37,7 @@
 
 **Three-file core** (`src/ast.rs`, `src/parser.rs`, `src/renderer.rs`):
 - `ast.rs`: 18 `Node` enum variants with serde derives - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `parser.rs`: 3,545 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
+- `parser.rs`: 3,562 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
 - `renderer.rs`: 205 lines, recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
 
 **Public API** (`src/lib.rs`, 64 lines): Single function `markdown_to_html(&str) -> String`
@@ -43,9 +50,10 @@ cat README.md | cargo run > output.html
 
 **Test Infrastructure** (`tests/spec_tests.rs`):
 - Loads 655 JSON test cases from `tests/data/tests.json` (CommonMark v0.31.2)
-- Non-failing test - tracks progress, prints first 5 failures with diffs
+- **Non-failing test** - tracks progress, prints first 5 failures with diffs (intentional during development)
 - Each test: `{markdown, html, example, start_line, end_line, section}`
 - Run with `--nocapture` to see detailed output
+- Output format: Shows ❌ for failures with input/expected/got, then 📊 summary with coverage %
 
 **Critical: Parser Order** (`src/parser.rs` main loop):
 The order of checks in `parse()` prevents false positives:
@@ -66,11 +74,17 @@ The order of checks in `parse()` prevents false positives:
 **Building & Testing:**
 ```bash
 cargo build --verbose                    # Rust 2024 edition
-cargo test --verbose                     # Run all 655 spec tests
-cargo test -- --nocapture                # See detailed output with first 5 failures
+cargo test --verbose                     # Run all 655 spec tests (non-failing)
+cargo test -- --nocapture                # See detailed output with first 5 failures + coverage %
 cargo fmt --all -- --check               # Format check (required for CI)
 cargo clippy --all-targets --all-features -- -D warnings  # Linting (zero warnings)
 cargo doc --no-deps --verbose            # Generate docs
+```
+
+**Running the CLI:**
+```bash
+echo "# Hello" | cargo run               # Parse from stdin
+cat README.md | cargo run > output.html  # Convert file to HTML
 ```
 
 **Test exploration (requires `jq`):**
@@ -96,7 +110,7 @@ jq '.[] | select(.example == 123)' tests/data/tests.json
 
 ## Coding Conventions
 
-**Rust Edition 2024:** Minimum Rust 1.85+. Latest stable features. Current tested version: 1.90.0 (Sept 14, 2025).
+**Rust Edition 2024:** Minimum Rust 1.85+. Latest stable features. Uses edition="2024" in `Cargo.toml`.
 
 **Testing Strategy:**
 1. **Spec compliance first** - every feature must pass CommonMark tests
@@ -218,7 +232,7 @@ jq '.[] | select(.example == 123)' tests/data/tests.json
 src/
   lib.rs           # Public API: markdown_to_html() (64 lines)
   ast.rs           # Node enum (18 variants, 49 lines)
-  parser.rs        # Parser struct (3,525 lines)
+  parser.rs        # Parser struct (3,562 lines)
   renderer.rs      # HtmlRenderer with escape_html() (205 lines)
   main.rs          # Binary entry point (11 lines)
 
@@ -306,12 +320,25 @@ src/
 ## Common Pitfalls & Troubleshooting
 
 **Common Test Failure Patterns:**
-The majority of current failures (159/655 tests) fall into these categories:
-1. **Emphasis and strong emphasis**: Full delimiter run algorithm needed (132 tests in section)
-2. **Link edge cases**: Complex link scenarios, reference definitions, URL encoding (90 tests)
-3. **List items**: Nested lists with proper indentation tracking (48 tests)
-4. **HTML blocks edge cases**: While 7 types are implemented, some edge cases remain (46 tests total)
+The majority of current failures (152/655 tests) fall into these categories:
+1. **Emphasis and strong emphasis**: Full delimiter run algorithm needed (56/132 tests failing)
+2. **Link edge cases**: Complex link scenarios, reference definitions, URL encoding (90 tests total)
+3. **List items**: Nested lists with proper indentation tracking (48 tests total)
+4. **HTML blocks edge cases**: 3 failures remain - blank line interruption, list integration (43/46 passing)
 5. **Tab handling in nested contexts**: Tabs within blockquotes, lists, code blocks - partial tab expansion logic
+
+**Test Section Breakdown (by test count):**
+Top 10 sections with most tests (use `jq` to explore):
+- Emphasis and strong emphasis: 132 tests
+- Links: 90 tests  
+- List items: 48 tests
+- HTML blocks: 46 tests
+- Fenced code blocks: 29 tests
+- Setext headings: 27 tests
+- Link reference definitions: 27 tests
+- Lists: 26 tests
+- Block quotes: 25 tests
+- Images: 22 tests
 
 **When tests fail after changes:**
 ```bash
