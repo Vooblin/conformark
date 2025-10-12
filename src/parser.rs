@@ -631,21 +631,10 @@ impl Parser {
                     break;
                 }
             } else {
-                // Blank line - look ahead to see if blockquote continues
-                let mut j = i + 1;
-                while j < lines.len() && lines[j].trim().is_empty() {
-                    j += 1;
-                }
-
-                if j < lines.len() && self.is_blockquote_start(lines[j]) {
-                    // Blockquote continues after blank lines, include them
-                    quote_lines.extend(std::iter::repeat_n(String::new(), j - i));
-                    had_lazy = false;
-                    i = j;
-                } else {
-                    // Blockquote ends
-                    break;
-                }
+                // Blank line - according to CommonMark spec:
+                // "A blank line always separates block quotes"
+                // So we stop here regardless of what follows
+                break;
             }
         }
 
