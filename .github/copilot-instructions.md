@@ -1,16 +1,20 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 91.5% spec compliance (599/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 91.8% spec compliance (601/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture     # See test results + coverage (91.5%)
+cargo test -- --nocapture     # See test results + coverage (91.8%)
 echo "**bold**" | cargo run   # Test CLI parser
 cargo run --example test_emphasis  # Run 132 emphasis tests only
 ```
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
+
+## Project Philosophy
+
+**Non-blocking tests**: All tests pass in CI regardless of spec coverage. The test harness (`tests/spec_tests.rs`) reports statistics to stderr but never fails—this enables incremental development while tracking progress toward 100% compliance. See line 63 for the pattern.
 
 ## Architecture Overview
 
@@ -21,7 +25,9 @@ cargo run --example test_emphasis  # Run 132 emphasis tests only
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter
 
-**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 scans the entire input to collect all references into a `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks). Phase 2 parses blocks using these pre-collected references for single-pass inline link resolution.
+**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 30-146) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 147-235) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
+
+**Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 1955-2342). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking.
 
 ## Critical Block Parsing Order
 
@@ -90,11 +96,11 @@ jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn  # Count b
 ## Implementation Patterns
 
 **Parser method naming** (find with `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`):
-- `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()`)
-- `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()`)
-- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()`)
+- `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()` line 560, `is_fenced_code_start()` line 366)
+- `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 622, `parse_list()` line 1295)
+- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2628, `try_parse_code_span()` line 2465)
 
-**Lookahead pattern** (indented code + setext headings):
+**Lookahead pattern** for indented code + setext headings (prevents premature paragraph commits):
 ```rust
 let mut j = i + 1;
 while j < lines.len() && lines[j].trim().is_empty() { j += 1; }
@@ -103,18 +109,19 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 }
 ```
 
-**Renderer output** (all block elements end with `\n`):
-- Void: `<hr />\n`, `<br />\n`
-- Block: `<p>...</p>\n`, `<blockquote>\n...\n</blockquote>\n`
-- Conditional attrs: `<ol start="5">` only if start ≠ 1, `<code class="language-rust">` only if info string present
+**Renderer output conventions** (all block elements end with `\n`):
+- Void tags: `<hr />\n`, `<br />\n`
+- Block tags: `<p>...</p>\n`, `<blockquote>\n...\n</blockquote>\n`
+- Conditional attributes: `<ol start="5">` only if start ≠ 1 (line 57), `<code class="language-rust">` only if info string present (line 36)
 
-**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). See `count_indent_columns()` in parser.
+**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 245) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (599/655 - 91.5%)
+## Current Test Coverage (601/655 - 91.8%)
 
-**Remaining failures** (56 tests):
-- List items: Empty items, blockquote interactions, lazy continuation edge cases
+**Remaining failures** (54 tests):
+- List items: 2 failures - blockquote interactions, block-level content formatting
 - Complex link/image scenarios with nested brackets
+- List tightness edge cases
 
 **Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 63: test always passes, outputs statistics to stderr.
 
@@ -129,12 +136,13 @@ When tests fail after changes:
 
 ## Common Pitfalls
 
-1. **Block order violations**: Adding block type in wrong position breaks existing tests
-2. **Tab expansion**: Tabs are NOT 4 spaces - use `count_indent_columns()` which advances to next multiple of 4
-3. **Link refs**: Case-insensitive, whitespace-collapsed, stored in phase 1
-4. **Setext headings**: Must lookahead before committing to paragraph parse
-5. **HTML blocks**: 7 distinct start conditions with different end conditions (`is_html_block_start`)
-6. **List compatibility**: Compatible markers continue list, incompatible start new list (see `ListType::is_compatible()`)
+1. **Block order violations**: Adding block type in wrong position in `parse()` method (lines 147-235) breaks existing tests. The order is load-bearing.
+2. **Tab expansion**: Tabs are NOT 4 spaces - use `count_indent_columns()` which advances to next multiple of 4 (e.g., tab at column 2 → column 4, at column 5 → column 8)
+3. **Link refs**: Case-insensitive (`[FOO]` matches `[foo]`), whitespace-collapsed, stored in phase 1. Normalize with `.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")` pattern.
+4. **Setext headings**: Must lookahead (line 222) before committing to paragraph parse, otherwise underline becomes separate paragraph
+5. **HTML blocks**: 7 distinct start conditions (line 805) with different end conditions. Type 1 (`<script>`) ends with `</script>`, Type 6 (normal tags) ends with blank line.
+6. **List compatibility**: Compatible markers (same type/delimiter) continue list, incompatible start new list. See `ListType::is_compatible()` line 1819.
+7. **Delimiter flanking**: `*` and `_` have asymmetric rules. `_` requires punctuation before/after for certain positions (lines 2059-2079). Don't simplify this logic.
 
 ## Key Resources
 
