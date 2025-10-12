@@ -10,19 +10,23 @@
 
 **Critical**: Parser order matters! `src/parser.rs` checks block types in specific sequence to avoid false positives (link refs → ATX headings → thematic breaks → blockquotes → HTML → lists → fenced code → indented code → setext headings → paragraphs).
 
-**Test-driven**: 655 spec tests in `tests/data/tests.json`. Current: 79.7% coverage (522/655 passing - Oct 2025). Non-failing tests track progress intentionally.
+**Test-driven**: 655 spec tests in `tests/data/tests.json`. Current: 81.1% coverage (531/655 passing). Non-failing tests track progress intentionally.
 
-**Main gaps**: Link reference edge cases (multiline titles, angle brackets), complex link scenarios, nested list indentation tracking.
+**Main gaps (124 failing tests)**: Link reference definitions in special contexts (multiline labels, inside blockquotes, paragraph interruption), complex link scenarios, nested list indentation tracking. Top test sections: Emphasis (132 tests), Links (90), List items (48).
 
 **Key resources**: `assets/spec.txt` (9,811 line authoritative spec), `tests/data/tests.json` (all 655 test cases), `examples/test_*.rs` (focused test runners).
 
 ## Essential Workflows
 
-**Run tests with details**: `cargo test -- --nocapture` shows first 5 failures with diffs + coverage %.
+**Run tests with details**: `cargo test -- --nocapture` shows first 5 failures with diffs + coverage %. Currently: 531/655 passing (81.1%).
+
+**Fast iteration**: `cargo test --lib -- --nocapture` runs just library tests (skips doc tests).
 
 **Debug specific sections**: `cargo run --example test_emphasis` runs just emphasis tests (132 cases) - faster iteration. Available: `test_html_blocks`, `test_link_refs`, `test_169`.
 
 **Query tests**: `jq '.[] | select(.section == "Links")' tests/data/tests.json` finds specific test cases. `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn` shows sections by test count.
+
+**Find failing tests**: Look at test output from `cargo test -- --nocapture` to see which examples fail (e.g., "Test 203 failed").
 
 **CI requirements**: `cargo fmt --check && cargo clippy && cargo doc` - all must pass before commit.
 
@@ -58,7 +62,7 @@
 
 **Three-file core**:
 - `src/ast.rs` (49 lines): 18 `Node` enum variants - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists (Unordered/Ordered/ListItem), Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `src/parser.rs` (3,659 lines): Stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
+- `src/parser.rs` (3,659 lines): Stateful parser with `HashMap` for link references, **two-phase parsing**: (1) collect link reference definitions, (2) parse blocks with inline content
 - `src/renderer.rs` (206 lines): Recursive pattern matching on `Node`, HTML escaping, tight/loose list logic
 
 **API & CLI**:
@@ -112,6 +116,18 @@ cargo run --example test_169             # Single test case
 
 # Pattern: Copy examples/test_emphasis.rs, change .section filter
 # Useful for rapid iteration on specific features
+```
+
+**Debugging Individual Test Cases**:
+```bash
+# Find a specific failing test by example number
+jq '.[] | select(.example == 203)' tests/data/tests.json
+
+# Quick test of your changes on specific input
+echo "**bold**" | cargo run
+
+# Run just one test case with a custom example program
+cargo run --example test_169  # Edit this file to test any example
 ```
 
 **Test exploration (requires `jq`):**
@@ -171,6 +187,9 @@ jq '.[] | select(.example == 123)' tests/data/tests.json
    fn parse_atx_heading(&self, line: &str) -> Option<Node> { ... }
    fn parse_fenced_code_block(&self, lines: &[&str], ...) -> (Node, usize) { ... }
    fn parse_indented_code_block(&self, lines: &[&str]) -> (Node, usize) { ... }
+   
+   // Quick way to find all parsing methods:
+   // grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs
    ```
 
 3. **Lookahead for Blank Lines**: Indented code blocks handle blank lines with lookahead

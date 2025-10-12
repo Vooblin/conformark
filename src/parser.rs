@@ -3174,16 +3174,30 @@ impl Parser {
 
         // Parse destination
         let (destination, chars_consumed) = self.parse_link_destination(remaining)?;
-        remaining = remaining[chars_consumed..].trim_start();
+        let after_dest = &remaining[chars_consumed..];
+
+        // Check if there's whitespace after destination (required if title follows)
+        let has_whitespace_after_dest = after_dest.starts_with(|c: char| c.is_whitespace());
+        remaining = after_dest.trim_start();
+
+        // Track if we moved to a new line for title
+        let moved_to_new_line_for_title = remaining.is_empty() && current_line + 1 < lines.len();
 
         // Check if we need to continue to next line for title
-        if remaining.is_empty() && current_line + 1 < lines.len() {
+        if moved_to_new_line_for_title {
             current_line += 1;
             remaining = lines[current_line].trim_start();
         }
 
         // Try to parse optional title (can span multiple lines)
+        // Title must be separated from destination by whitespace
         let title = if !remaining.is_empty() {
+            // If there's content after destination, there must have been whitespace OR we're on a new line
+            if !has_whitespace_after_dest && !moved_to_new_line_for_title {
+                // No whitespace between destination and what follows
+                return None;
+            }
+
             if let Some((title_text, lines_for_title)) =
                 self.parse_multiline_link_title(&lines[current_line..], remaining)
             {
@@ -3192,11 +3206,18 @@ impl Parser {
                 Some(title_text)
             } else {
                 // Not a valid title, but that's ok - title is optional
-                // Rest of line must be empty though
-                if !remaining.is_empty() {
-                    return None;
+                // If we moved to a new line for title but it wasn't a title, that's fine - we just don't consume that line
+                if moved_to_new_line_for_title {
+                    // Back up - we didn't actually consume the next line
+                    current_line -= 1;
+                    None
+                } else {
+                    // We're still on the same line as destination - rest must be empty
+                    if !remaining.is_empty() {
+                        return None;
+                    }
+                    None
                 }
-                None
             }
         } else {
             None
