@@ -18,8 +18,121 @@ impl Parser {
         let lines: Vec<&str> = input.lines().collect();
 
         // FIRST PASS: Collect all link reference definitions
+        // Skip lines that are inside code blocks or other contexts where link refs don't apply
         let mut i = 0;
         while i < lines.len() {
+            let line = lines[i];
+
+            // Skip fenced code blocks entirely
+            if let Some((fence_char, fence_len, _indent)) = self.is_fenced_code_start(line) {
+                i += 1; // Skip opening fence
+                // Skip until closing fence
+                while i < lines.len() {
+                    if self.is_closing_fence(lines[i], fence_char, fence_len) {
+                        i += 1; // Skip closing fence
+                        break;
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+
+            // Skip indented code blocks (4+ spaces)
+            if self.is_indented_code_line(line) {
+                // Skip consecutive indented lines
+                while i < lines.len()
+                    && (self.is_indented_code_line(lines[i]) || lines[i].trim().is_empty())
+                {
+                    // Look ahead to see if blank lines continue the code block
+                    if lines[i].trim().is_empty() {
+                        let mut j = i + 1;
+                        while j < lines.len() && lines[j].trim().is_empty() {
+                            j += 1;
+                        }
+                        if j < lines.len() && self.is_indented_code_line(lines[j]) {
+                            i += 1; // Include blank line in code block
+                            continue;
+                        } else {
+                            break; // Blank lines end the code block
+                        }
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+
+            // Handle blockquotes - need to check for link refs inside them
+            if self.is_blockquote_start(line) {
+                // Collect blockquote lines and check them recursively
+                let mut quote_lines = Vec::new();
+                let mut j = i;
+
+                while j < lines.len() {
+                    let qline = lines[j];
+                    if self.is_blockquote_start(qline) {
+                        let stripped = self.strip_blockquote_marker(qline);
+                        quote_lines.push(stripped);
+                        j += 1;
+                    } else if !qline.trim().is_empty() && self.can_lazy_continue(qline) {
+                        quote_lines.push(qline.to_string());
+                        j += 1;
+                    } else if qline.trim().is_empty() {
+                        // Look ahead to see if blockquote continues
+                        let mut k = j + 1;
+                        while k < lines.len() && lines[k].trim().is_empty() {
+                            k += 1;
+                        }
+                        if k < lines.len() && self.is_blockquote_start(lines[k]) {
+                            quote_lines.extend(std::iter::repeat_n(String::new(), k - j));
+                            j = k;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                // Recursively parse link refs in blockquote content
+                let content = quote_lines.join("\n");
+                let content_lines: Vec<&str> = content.lines().collect();
+                let mut k = 0;
+                while k < content_lines.len() {
+                    if let Some(lines_consumed) =
+                        self.try_parse_link_reference_definition(&content_lines[k..])
+                    {
+                        k += lines_consumed;
+                    } else {
+                        k += 1;
+                    }
+                }
+
+                i = j;
+                continue;
+            }
+
+            // Link reference definitions cannot interrupt a paragraph
+            // Check if previous line could be part of a paragraph (non-blank, not a block structure)
+            if i > 0 {
+                let prev_line = lines[i - 1];
+                let is_prev_blank = prev_line.trim().is_empty();
+                let is_prev_special = self.parse_atx_heading(prev_line).is_some()
+                    || self.is_thematic_break(prev_line)
+                    || self.is_blockquote_start(prev_line)
+                    || self.is_html_block_start(prev_line).is_some()
+                    || self.is_list_start(prev_line).is_some()
+                    || self.is_fenced_code_start(prev_line).is_some()
+                    || self.is_indented_code_line(prev_line);
+
+                // If previous line is not blank and not a special block, it's part of a paragraph
+                // Link refs cannot interrupt paragraphs
+                if !is_prev_blank && !is_prev_special {
+                    i += 1;
+                    continue;
+                }
+            }
+
+            // Try to parse link reference definition
             if let Some(lines_consumed) = self.try_parse_link_reference_definition(&lines[i..]) {
                 i += lines_consumed;
             } else {
