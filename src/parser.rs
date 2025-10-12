@@ -1269,7 +1269,7 @@ impl Parser {
                 }
 
                 // Parse this list item (multi-line support)
-                let (item, consumed, item_has_blank) =
+                let (item, consumed, item_has_multiple_blocks) =
                     self.parse_list_item(&lines[i..], &current_type);
                 items.push(item);
                 i += consumed;
@@ -1279,8 +1279,8 @@ impl Parser {
                     has_blank_between_items = true;
                 }
 
-                // Item contains blank lines makes list loose
-                if item_has_blank {
+                // Item contains multiple blocks separated by blanks makes list loose
+                if item_has_multiple_blocks {
                     has_blank_between_items = true;
                 }
             } else if i > 0 && lines[i].trim().is_empty() {
@@ -1418,23 +1418,12 @@ impl Parser {
             other => vec![other],
         };
 
-        // Determine if this is a "loose" list item (contains blank lines between blocks)
-        // For now, if we have blank lines and multiple blocks, wrap in <p> tags
-        let final_children = if has_blank && children.len() > 1 {
-            // Wrap non-paragraph blocks in paragraphs if needed
-            children
-        } else if has_blank && children.len() == 1 {
-            // Single block with blank lines - wrap in paragraph
-            match &children[0] {
-                Node::Paragraph(_) => children,
-                _ => children, // Already in proper format
-            }
-        } else {
-            children
-        };
+        // Determine if item has multiple blocks separated by blank lines
+        // This makes the parent list loose
+        let has_multiple_blocks_with_blanks = has_blank && children.len() > 1;
 
-        let item = Node::ListItem(final_children);
-        (item, i, has_blank)
+        let item = Node::ListItem(children);
+        (item, i, has_multiple_blocks_with_blanks)
     }
 
     /// Calculate the required indent for list item continuation
