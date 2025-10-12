@@ -5,16 +5,20 @@ A CommonMark v0.31.2 parser in Rust (edition 2024) with 82.4% spec compliance (5
 ## Architecture (3-File Core)
 
 - `src/ast.rs` (49 lines): 18 `Node` enum variants (Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `src/parser.rs` (3,857 lines): **Two-phase parsing**: (1) collect link reference definitions in `HashMap`, (2) parse blocks with inline content. Checks block types in critical order to avoid false positives.
+- `src/parser.rs` (3,890 lines): **Two-phase parsing architecture**
+  - **Phase 1 (lines 17-105)**: Scan entire input to collect link reference definitions into `HashMap<String, (String, Option<String>)>`, skipping fenced/indented code blocks where link refs can't appear
+  - **Phase 2 (lines 106+)**: Parse blocks in critical order, using collected references for inline link resolution
+  - Contains 43 helper methods following `is_*`/`parse_*`/`try_parse_*` naming convention
+  - `Parser` struct (line 5) holds only the `reference_definitions` HashMap - stateless for each parse call
 - `src/renderer.rs` (206 lines): Recursive pattern matching on `Node` → HTML with proper escaping
-- `src/lib.rs` (64 lines): Public API + unit tests for edge cases
+- `src/lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String` + 6 unit tests for edge cases
 - `src/main.rs` (11 lines): CLI tool that reads stdin → outputs HTML
 
-**API**: `markdown_to_html(&str) -> String` in `src/lib.rs`, CLI in `src/main.rs` reads stdin/outputs HTML.
+**Quick Start**: `echo "**bold**" | cargo run` or `cargo test -- --nocapture` to see test results with diffs.
 
-## Critical Parser Order (src/parser.rs line ~30)
+## Critical Parser Order (src/parser.rs lines 106-400)
 
-The `parse()` method checks blocks in this EXACT sequence to prevent misidentification:
+After phase 1 collects link references, the `parse()` method checks blocks in this EXACT sequence to prevent misidentification:
 1. Link reference definitions (silent, don't produce blocks)
 2. ATX headings (before thematic breaks - `###` ambiguous)
 3. Thematic breaks (before lists)
@@ -56,13 +60,13 @@ Reordering these causes cascading test failures.
    }
    ```
 
-**Find parser methods**: `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` (shows ~30 methods)
+**Find parser methods**: `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` (shows 43 methods: ~20 `is_*` predicates, ~15 `parse_*` block parsers, ~8 `try_parse_*` inline parsers)
 
 ## Essential Workflows
 
-**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 5 failures with diffs + 82.4% coverage)
+**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 10 failures with example numbers + diffs + 82.4% coverage)
 
-**Fast iteration on specific sections**: 
+**Fast iteration on specific sections** (bypass full test suite): 
 ```bash
 cargo run --example test_emphasis      # 132 emphasis tests only
 cargo run --example test_html_blocks   # 46 HTML block tests
@@ -79,10 +83,15 @@ jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn  # Count b
 
 **Quick manual test**: `echo "**bold**" | cargo run`
 
-**CI requirements** (3 toolchains: stable/beta/nightly):
+**CI requirements** (3 toolchains: stable/beta/nightly, defined in `.github/workflows/ci.yml`):
 - `cargo fmt --all -- --check` (formatting)
 - `cargo clippy --all-targets --all-features -- -D warnings` (zero warnings)
 - `cargo doc --no-deps` (doc generation)
+- `cargo test --verbose` (all tests must pass)
+
+**Dependencies**:
+- Runtime: `serde` (with derive), `serde_json` (for test data loading)
+- Dev: `test-fuzz = "*"` (fuzzing support, not currently used in CI)
 
 ## Implementation Patterns
 
