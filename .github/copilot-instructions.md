@@ -1,12 +1,14 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 82.1% spec compliance (538/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 82.4% spec compliance (540/655 tests passing).
 
 ## Architecture (3-File Core)
 
 - `src/ast.rs` (49 lines): 18 `Node` enum variants (Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `src/parser.rs` (3,744 lines): **Two-phase parsing**: (1) collect link reference definitions in `HashMap`, (2) parse blocks with inline content. Checks block types in critical order to avoid false positives.
+- `src/parser.rs` (3,857 lines): **Two-phase parsing**: (1) collect link reference definitions in `HashMap`, (2) parse blocks with inline content. Checks block types in critical order to avoid false positives.
 - `src/renderer.rs` (206 lines): Recursive pattern matching on `Node` → HTML with proper escaping
+- `src/lib.rs` (64 lines): Public API + unit tests for edge cases
+- `src/main.rs` (11 lines): CLI tool that reads stdin → outputs HTML
 
 **API**: `markdown_to_html(&str) -> String` in `src/lib.rs`, CLI in `src/main.rs` reads stdin/outputs HTML.
 
@@ -58,7 +60,7 @@ Reordering these causes cascading test failures.
 
 ## Essential Workflows
 
-**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 5 failures with diffs + 82.1% coverage)
+**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 5 failures with diffs + 82.4% coverage)
 
 **Fast iteration on specific sections**: 
 ```bash
@@ -107,10 +109,10 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs expand to next multiple of 4 (NOT fixed 4 spaces). Partial tab removal in `remove_code_indent()` adds padding spaces.
 
-## Current Test Coverage (538/655 passing)
+## Current Test Coverage (540/655 passing - 82.4%)
 
-**Top failing sections** (117 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
-- Link reference definitions in special contexts (multiline titles, inside blockquotes, paragraph interruption)
+**Top failing sections** (115 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
+- ~~Link reference definitions in special contexts (multiline titles, inside blockquotes, paragraph interruption)~~ ✅ **100% complete (27/27)**
 - Complex link scenarios (nested brackets, reference link edge cases)
 - Nested list indentation tracking
 - Tab handling in nested contexts (blockquotes, lists, code blocks)
