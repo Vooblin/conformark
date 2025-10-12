@@ -1370,41 +1370,36 @@ impl Parser {
             }
         }
 
-        // Apply tight/loose formatting to all items
-        let tight = !has_blank_between_items;
-        let formatted_items = if tight {
-            // Tight list - unwrap single paragraphs from items
+        // Determine list-level tightness
+        let list_is_tight = !has_blank_between_items;
+
+        // In a loose list, all items must render loosely (with <p> tags)
+        // In a tight list, items render based on their individual tightness
+        let items = if !list_is_tight {
+            // Loose list - mark all items as loose
             items
                 .into_iter()
                 .map(|item| match item {
-                    Node::ListItem(children) => {
-                        let unwrapped = children
-                            .into_iter()
-                            .flat_map(|child| match child {
-                                Node::Paragraph(para_children) => para_children,
-                                other => vec![other],
-                            })
-                            .collect();
-                        Node::ListItem(unwrapped)
-                    }
+                    Node::ListItem { children, .. } => Node::ListItem {
+                        tight: false,
+                        children,
+                    },
                     other => other,
                 })
                 .collect()
         } else {
-            // Loose list - items keep their paragraph tags
             items
         };
 
-        // Create the appropriate list node
         let list_node = match list_type {
             ListType::Unordered(_) => Node::UnorderedList {
-                tight,
-                children: formatted_items,
+                tight: list_is_tight,
+                children: items,
             },
             ListType::Ordered(start, _) => Node::OrderedList {
                 start,
-                tight,
-                children: formatted_items,
+                tight: list_is_tight,
+                children: items,
             },
         };
 
@@ -1412,7 +1407,7 @@ impl Parser {
     }
 
     /// Parse a single list item with multi-line support
-    /// Returns (Node, lines_consumed, has_blank_lines)
+    /// Returns (Node, lines_consumed, has_multiple_blocks_with_blanks)
     fn parse_list_item(&mut self, lines: &[&str], list_type: &ListType) -> (Node, usize, bool) {
         let first_line = lines[0];
 
@@ -1438,7 +1433,7 @@ impl Parser {
         }
 
         let mut i = 1;
-        let mut has_blank = false;
+        let mut _has_blank = false;
         let mut last_line_was_blank = false;
         let mut blank_count_after_marker = if first_line_is_blank { 1 } else { 0 };
 
@@ -1476,7 +1471,7 @@ impl Parser {
                     }
                 }
 
-                has_blank = true;
+                _has_blank = true;
                 last_line_was_blank = true;
                 item_lines.push(String::new());
                 i += 1;
@@ -1532,11 +1527,39 @@ impl Parser {
             other => vec![other],
         };
 
-        // Determine if item has multiple blocks separated by blank lines
-        // This makes the parent list loose
-        let has_multiple_blocks_with_blanks = has_blank && children.len() > 1;
+        let paragraph_count = children
+            .iter()
+            .filter(|c| matches!(c, Node::Paragraph(_)))
+            .count();
 
-        let item = Node::ListItem(children);
+        // An item has multiple blocks with blanks between them if:
+        // - It has 2+ paragraphs (must have blank between paragraphs), OR
+        // - It has other combinations that likely had blanks based on CommonMark rules
+        //
+        // Strategy: Be conservative - only mark as having blanks between blocks if we're sure
+        // Lists can follow other blocks without blank lines, so don't count them
+        // Code blocks and block quotes typically need blank lines
+        let para_or_special_count = children
+            .iter()
+            .filter(|c| {
+                matches!(
+                    c,
+                    Node::Paragraph(_) | Node::CodeBlock { .. } | Node::BlockQuote(_)
+                )
+            })
+            .count();
+
+        let has_multiple_blocks_with_blanks =
+            paragraph_count >= 2 || (_has_blank && para_or_special_count >= 2);
+
+        // Determine if this specific item should render tightly
+        // Same logic
+        let item_is_tight = !(paragraph_count >= 2 || (_has_blank && para_or_special_count >= 2));
+
+        let item = Node::ListItem {
+            tight: item_is_tight,
+            children,
+        };
         (item, i, has_multiple_blocks_with_blanks)
     }
 

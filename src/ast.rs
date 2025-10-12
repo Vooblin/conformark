@@ -26,7 +26,10 @@ pub enum Node {
         tight: bool,
         children: Vec<Node>,
     }, // Contains ListItem nodes
-    ListItem(Vec<Node>), // Contains block-level content
+    ListItem {
+        tight: bool, // Whether this item should render tightly (no <p> for simple content)
+        children: Vec<Node>, // Contains block-level content
+    },
     // Inline nodes
     Text(String),
     Code(String),        // Inline code span

@@ -20,8 +20,8 @@ cargo run --example test_emphasis  # Run 132 emphasis tests only
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
 - `ast.rs` (49 lines): Single `Node` enum with 18 variants (all `serde` serializable)
-- `parser.rs` (4,026 lines): Two-phase architecture with 44+ methods
-- `renderer.rs` (207 lines): Pattern-matching HTML renderer
+- `parser.rs` (4,105 lines): Two-phase architecture with 44+ methods
+- `renderer.rs` (206 lines): Pattern-matching HTML renderer
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter
 

@@ -62,7 +62,10 @@ fn render_node(node: &Node) -> String {
                 format!("<ol start=\"{}\">\n{}</ol>\n", start, content)
             }
         }
-        Node::ListItem(children) => {
+        Node::ListItem { tight, children } => {
+            // Determine if this item should render its paragraphs with <p> tags
+            // If tight is true, single paragraphs are unwrapped
+
             // Check if we have a mix of inline and block content
             let has_blocks = children.iter().any(|child| {
                 matches!(
@@ -76,6 +79,25 @@ fn render_node(node: &Node) -> String {
                         | Node::HtmlBlock(_)
                 )
             });
+
+            if *tight && children.len() == 1 {
+                // Tight item with single child - unwrap paragraph if it's the only content
+                match &children[0] {
+                    Node::Paragraph(para_children) => {
+                        let content: String = para_children.iter().map(render_node).collect();
+                        return format!("<li>{}</li>\n", content.trim_end());
+                    }
+                    _ => {
+                        // Single non-paragraph block
+                        let content = render_node(&children[0]);
+                        if content.ends_with('\n') {
+                            return format!("<li>\n{}</li>\n", content);
+                        } else {
+                            return format!("<li>{}</li>\n", content);
+                        }
+                    }
+                }
+            }
 
             if has_blocks {
                 // Render inline elements first (if any) on the same line as <li>
@@ -93,6 +115,19 @@ fn render_node(node: &Node) -> String {
                         | Node::HtmlInline(_)
                         | Node::HardBreak => {
                             inline_content.push_str(&render_node(child));
+                        }
+                        Node::Paragraph(para_children) if *tight => {
+                            // In a tight list item, unwrap first paragraph to inline
+                            let para_content: String =
+                                para_children.iter().map(render_node).collect();
+                            // First paragraph goes on same line as <li>
+                            if inline_content.is_empty() && block_content.is_empty() {
+                                inline_content.push_str(&para_content);
+                            } else {
+                                // Subsequent paragraphs in tight items also unwrapped but as block-level
+                                block_content.push_str(&para_content);
+                                block_content.push('\n');
+                            }
                         }
                         _ => {
                             block_content.push_str(&render_node(child));
