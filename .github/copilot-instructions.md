@@ -87,6 +87,18 @@ echo "# Hello" | cargo run               # Parse from stdin
 cat README.md | cargo run > output.html  # Convert file to HTML
 ```
 
+**Debugging Specific Sections** (use `examples/` for focused testing):
+```bash
+# Run section-specific test programs (faster than full suite)
+cargo run --example test_emphasis        # Just emphasis tests (132 tests)
+cargo run --example test_html_blocks     # Just HTML blocks (46 tests)
+cargo run --example test_link_refs       # Just link references (27 tests)
+cargo run --example test_169             # Single test case
+
+# Pattern: Copy examples/test_emphasis.rs, change .section filter
+# Useful for rapid iteration on specific features
+```
+
 **Test exploration (requires `jq`):**
 ```bash
 # List all 26 sections
@@ -240,6 +252,12 @@ tests/
   spec_tests.rs    # CommonMark v0.31.2 test runner
   data/
     tests.json     # 655 spec examples (JSON array)
+
+examples/
+  test_emphasis.rs    # Focused test runner for emphasis (132 tests)
+  test_html_blocks.rs # Focused test runner for HTML blocks (46 tests)
+  test_link_refs.rs   # Focused test runner for link references (27 tests)
+  test_169.rs         # Single test case runner (useful for debugging)
 
 assets/
   spec.txt         # Official CommonMark v0.31.2 spec (9,811 lines)
