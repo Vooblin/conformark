@@ -587,6 +587,26 @@ impl Parser {
         after_indent.starts_with('>')
     }
 
+    /// Check if a line starts a block structure (used for lazy continuation detection)
+    /// Returns true if the line starts: ATX heading, thematic break, blockquote,
+    /// HTML block, fenced code, or list
+    /// Note: Indented code blocks are NOT included because they cannot interrupt paragraphs
+    fn is_block_structure_start(&self, line: &str) -> bool {
+        // Blank lines are not block structure starts
+        if line.trim().is_empty() {
+            return false;
+        }
+
+        // Check for block starters that CAN interrupt paragraphs
+        // Indented code blocks are excluded - they cannot interrupt paragraphs
+        self.parse_atx_heading(line).is_some()
+            || self.is_thematic_break(line)
+            || self.is_blockquote_start(line)
+            || self.is_html_block_start(line).is_some()
+            || self.is_fenced_code_start(line).is_some()
+            || self.is_list_start(line).is_some()
+    }
+
     /// Parse a blockquote starting from the current position
     fn parse_blockquote(&mut self, lines: &[&str]) -> (Node, usize) {
         let mut quote_lines = Vec::new();
@@ -1371,6 +1391,7 @@ impl Parser {
 
         let mut i = 1;
         let mut has_blank = false;
+        let mut last_line_was_blank = false;
 
         while i < lines.len() {
             let line = lines[i];
@@ -1378,6 +1399,7 @@ impl Parser {
             // Blank line
             if line.trim().is_empty() {
                 has_blank = true;
+                last_line_was_blank = true;
                 item_lines.push(String::new());
                 i += 1;
                 continue;
@@ -1401,10 +1423,24 @@ impl Parser {
                 // Remove the item indentation and add to item
                 let dedented = self.remove_indent(line, content_indent);
                 item_lines.push(dedented);
+                last_line_was_blank = false;
                 i += 1;
             } else {
-                // Not enough indentation, stop item
-                break;
+                // Lazy continuation: If we have existing content, the previous line was NOT blank,
+                // and this line doesn't start a block structure, treat it as paragraph continuation
+                let can_lazy_continue = !item_lines.is_empty()
+                    && !last_line_was_blank
+                    && !self.is_block_structure_start(line);
+
+                if can_lazy_continue {
+                    // Add the line with its original indentation (lazy lines aren't dedented)
+                    item_lines.push(line.to_string());
+                    last_line_was_blank = false;
+                    i += 1;
+                } else {
+                    // Not enough indentation and can't lazy continue, stop item
+                    break;
+                }
             }
         }
 
