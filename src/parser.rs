@@ -635,6 +635,11 @@ impl Parser {
             return false;
         }
 
+        // List items cannot lazy continue
+        if self.is_list_start(line).is_some() {
+            return false;
+        }
+
         // Otherwise, can lazy continue
         true
     }
