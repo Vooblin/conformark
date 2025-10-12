@@ -1678,6 +1678,13 @@ impl Parser {
                 break;
             }
 
+            // Stop on HTML block (types 1-6 can interrupt paragraphs, type 7 cannot)
+            if let Some(html_type) = self.is_html_block_start(line)
+                && html_type != 7
+            {
+                break;
+            }
+
             // Check if this could be a Setext underline (would end the paragraph)
             if i > 0 && self.is_setext_underline(line).is_some() {
                 // This line is a Setext underline - don't include it in paragraph
