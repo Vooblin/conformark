@@ -3030,18 +3030,35 @@ impl Parser {
             return None;
         }
 
-        // Find the label (link text within brackets)
-        let label_end = trimmed.find(']')?;
+        // Find the label (link text within brackets), respecting escapes
+        let chars: Vec<char> = trimmed.chars().collect();
+        let mut i = 1; // Start after '['
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() {
+                // Skip escaped character
+                i += 2;
+            } else if chars[i] == ']' {
+                break;
+            } else {
+                i += 1;
+            }
+        }
+
+        if i >= chars.len() || chars[i] != ']' {
+            return None; // No closing bracket
+        }
+
+        let label_end = i;
         if label_end == 1 {
             // Empty label
             return None;
         }
 
-        let raw_label = &trimmed[1..label_end];
-        let label = Self::normalize_label(raw_label);
+        let raw_label: String = chars[1..label_end].iter().collect();
+        let label = Self::normalize_label(&raw_label);
 
         // After ], must have :
-        let after_label = &trimmed[label_end + 1..];
+        let after_label: String = chars[label_end + 1..].iter().collect();
         if !after_label.starts_with(':') {
             return None;
         }
