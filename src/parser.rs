@@ -478,6 +478,7 @@ impl Parser {
     fn parse_blockquote(&mut self, lines: &[&str]) -> (Node, usize) {
         let mut quote_lines = Vec::new();
         let mut i = 0;
+        let mut had_lazy = false;
 
         while i < lines.len() {
             let line = lines[i];
@@ -487,12 +488,30 @@ impl Parser {
                 // Strip the blockquote marker and add to quote lines
                 let stripped = self.strip_blockquote_marker(line);
                 quote_lines.push(stripped);
+                had_lazy = false; // Reset lazy flag when we see explicit marker
                 i += 1;
             } else if !line.trim().is_empty() {
                 // Check for lazy continuation
                 // A non-empty line without > can continue if it's not a new block structure
                 if self.can_lazy_continue(line) {
-                    quote_lines.push(line.to_string());
+                    // According to CommonMark spec: "The setext heading underline cannot
+                    // be a lazy continuation line in a list item or block quote"
+                    // So if this looks like a setext underline AND we had a lazy continuation
+                    // before it, we need to prevent it from being treated as such.
+                    // We do this by adding a backslash escape before the line.
+                    let line_to_add = if had_lazy && self.is_setext_underline(line).is_some() {
+                        let trimmed = line.trim_start();
+                        if !trimmed.is_empty() {
+                            let indent = line.len() - trimmed.len();
+                            format!("{}\\{}", " ".repeat(indent), trimmed)
+                        } else {
+                            line.to_string()
+                        }
+                    } else {
+                        line.to_string()
+                    };
+                    quote_lines.push(line_to_add);
+                    had_lazy = true;
                     i += 1;
                 } else {
                     // This starts a new block, stop the blockquote
@@ -508,6 +527,7 @@ impl Parser {
                 if j < lines.len() && self.is_blockquote_start(lines[j]) {
                     // Blockquote continues after blank lines, include them
                     quote_lines.extend(std::iter::repeat_n(String::new(), j - i));
+                    had_lazy = false;
                     i = j;
                 } else {
                     // Blockquote ends
