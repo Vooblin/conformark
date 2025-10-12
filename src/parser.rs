@@ -1416,15 +1416,23 @@ impl Parser {
     fn parse_list_item(&mut self, lines: &[&str], list_type: &ListType) -> (Node, usize, bool) {
         let first_line = lines[0];
 
+        // Add first line content
+        let first_content = self.extract_list_item_content(first_line, list_type);
+
         // Calculate the content indent (W + N)
-        // W = marker width, N = spaces after marker (1-4)
-        let content_indent = self.calculate_list_item_indent(first_line, list_type);
+        // Special case: if first line has no content (just marker + spaces),
+        // the content indent is just marker width + 1, regardless of trailing spaces
+        let content_indent = if first_content.trim().is_empty() {
+            self.calculate_minimal_list_item_indent(first_line, list_type)
+        } else {
+            self.calculate_list_item_indent(first_line, list_type)
+        };
 
         // Collect all lines belonging to this list item
         let mut item_lines = Vec::new();
 
-        // Add first line content
-        let first_content = self.extract_list_item_content(first_line, list_type);
+        let first_line_is_blank = first_content.trim().is_empty();
+
         if !first_content.is_empty() {
             item_lines.push(first_content);
         }
@@ -1432,12 +1440,25 @@ impl Parser {
         let mut i = 1;
         let mut has_blank = false;
         let mut last_line_was_blank = false;
+        let mut blank_count_after_marker = if first_line_is_blank { 1 } else { 0 };
 
         while i < lines.len() {
             let line = lines[i];
 
             // Blank line
             if line.trim().is_empty() {
+                // Per spec: "A list item can begin with at most one blank line"
+                // If first line is blank, we can have one more blank before stopping
+                if first_line_is_blank && blank_count_after_marker >= 1 && item_lines.is_empty() {
+                    // We've seen the blank line after marker, and now another blank
+                    // Stop the list item - following content is not part of it
+                    break;
+                }
+
+                if first_line_is_blank && item_lines.is_empty() {
+                    blank_count_after_marker += 1;
+                }
+
                 // Look ahead to see if a list item follows the blank line(s)
                 let mut j = i + 1;
                 while j < lines.len() && lines[j].trim().is_empty() {
@@ -1517,6 +1538,31 @@ impl Parser {
 
         let item = Node::ListItem(children);
         (item, i, has_multiple_blocks_with_blanks)
+    }
+
+    /// Calculate minimal indent for list items that start with blank/empty first line
+    /// Per spec: "When the list item starts with a blank line, the number of spaces
+    /// following the list marker doesn't change the required indentation"
+    /// Returns just marker_width + 1
+    fn calculate_minimal_list_item_indent(&self, line: &str, list_type: &ListType) -> usize {
+        let trimmed = line.trim_start();
+        let initial_indent = self.count_indent_columns(&line[..line.len() - trimmed.len()]);
+
+        match list_type {
+            ListType::Unordered(_) => {
+                // Marker is 1 char, minimal spacing is 1
+                initial_indent + 1 + 1
+            }
+            ListType::Ordered(_, delimiter) => {
+                // Find delimiter position to get marker width
+                if let Some(pos) = trimmed.find(*delimiter) {
+                    let marker_width = pos + 1;
+                    initial_indent + marker_width + 1
+                } else {
+                    initial_indent + 2 // Fallback
+                }
+            }
+        }
     }
 
     /// Calculate the required indent for list item continuation
