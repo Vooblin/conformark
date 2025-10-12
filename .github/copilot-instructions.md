@@ -1,11 +1,11 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 91.8% spec compliance (601/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 92.1% spec compliance (603/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture     # See test results + coverage (91.8%)
+cargo test -- --nocapture     # See test results + coverage (92.1%)
 echo "**bold**" | cargo run   # Test CLI parser
 cargo run --example test_emphasis  # Run 132 emphasis tests only
 ```
@@ -19,11 +19,11 @@ cargo run --example test_emphasis  # Run 132 emphasis tests only
 ## Architecture Overview
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
-- `ast.rs` (49 lines): Single `Node` enum with 18 variants (all `serde` serializable)
-- `parser.rs` (4,105 lines): Two-phase architecture with 44+ methods
-- `renderer.rs` (206 lines): Pattern-matching HTML renderer
-- `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
-- `main.rs` (11 lines): CLI stdin→HTML converter
+- `ast.rs` (~55 lines): Single `Node` enum with 18 variants (all `serde` serializable)
+- `parser.rs` (~4,100 lines): Two-phase architecture with 44+ methods
+- `renderer.rs` (~200 lines): Pattern-matching HTML renderer
+- `lib.rs` (~60 lines): Public API `markdown_to_html(&str) -> String`
+- `main.rs` (~10 lines): CLI stdin→HTML converter
 
 **Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 30-146) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 147-235) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
@@ -116,14 +116,14 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 245) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (601/655 - 91.8%)
+## Current Test Coverage (603/655 - 92.1%)
 
-**Remaining failures** (54 tests):
-- List items: 2 failures - blockquote interactions, block-level content formatting
-- Complex link/image scenarios with nested brackets
-- List tightness edge cases
+**Remaining failures** (52 tests):
+- List items: Complex blockquote interactions, block-level content formatting  
+- Link/image edge cases with nested brackets and reference resolution
+- List tightness edge cases with mixed content
 
-**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 63: test always passes, outputs statistics to stderr.
+**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 63: test always passes, outputs statistics to stderr. Failed examples: [109, 294, 302, 344, 348, 349, 413, 414, 417, 431]...
 
 ## Debugging Workflow
 

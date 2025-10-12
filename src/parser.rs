@@ -1304,6 +1304,21 @@ impl Parser {
                 break;
             }
 
+            // Skip link reference definitions at list level (not indented into items)
+            // This handles cases like:
+            // - a
+            //
+            //   [ref]: /url
+            // - b
+            if let Some(ref_lines) = self.try_parse_link_reference_definition(&lines[i..]) {
+                // Link ref at list level after blank lines makes list loose
+                if i > 0 && has_blank_between_items {
+                    // Already loose, just skip
+                }
+                i += ref_lines;
+                continue;
+            }
+
             // Check if current line is a list item of the same type
             if let Some(current_type) = self.is_list_start(lines[i]) {
                 if !list_type.is_compatible(&current_type) {
@@ -1330,7 +1345,18 @@ impl Parser {
                         j += 1;
                     }
 
-                    // If there's another list item after the blank lines, mark as loose
+                    // Skip over link reference definitions (they're invisible for block structure)
+                    while j < lines.len() {
+                        if let Some(ref_lines) =
+                            self.try_parse_link_reference_definition(&lines[j..])
+                        {
+                            j += ref_lines;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // If there's another list item after the blank lines (and any link refs), mark as loose
                     if j < lines.len()
                         && let Some(next_type) = self.is_list_start(lines[j])
                         && list_type.is_compatible(&next_type)
@@ -1349,6 +1375,15 @@ impl Parser {
                 let mut j = i + 1;
                 while j < lines.len() && lines[j].trim().is_empty() {
                     j += 1;
+                }
+
+                // Skip over link reference definitions (they're invisible for block structure)
+                while j < lines.len() {
+                    if let Some(ref_lines) = self.try_parse_link_reference_definition(&lines[j..]) {
+                        j += ref_lines;
+                    } else {
+                        break;
+                    }
                 }
 
                 // Check if next non-blank line continues the list
@@ -1458,6 +1493,20 @@ impl Parser {
                 let mut j = i + 1;
                 while j < lines.len() && lines[j].trim().is_empty() {
                     j += 1;
+                }
+
+                // Check if next line is a link reference definition (0-3 space indent)
+                // These should be treated as list-level, not item-level
+                if j < lines.len() {
+                    let next_indent = self.count_indent_columns(lines[j]);
+                    if next_indent <= 3
+                        && self
+                            .try_parse_link_reference_definition(&lines[j..])
+                            .is_some()
+                    {
+                        // Link ref def after blank line - stop item here
+                        break;
+                    }
                 }
 
                 // If there's a list item at the same or less indentation level after blanks, stop the item
