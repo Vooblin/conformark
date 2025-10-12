@@ -1,37 +1,37 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 83.2% spec compliance (545/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 83.4% spec compliance (546/655 tests passing).
 
-## Architecture (3-File Core)
+## Architecture (5-File Core)
 
-- `src/ast.rs` (49 lines): 18 `Node` enum variants (Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `src/parser.rs` (3,879 lines): **Two-phase parsing architecture**
-  - **Phase 1 (lines 17-110)**: Scan entire input to collect link reference definitions into `HashMap<String, (String, Option<String>)>`, skipping fenced/indented code blocks and recursively checking blockquotes where link refs can't/can appear
-  - **Phase 2 (lines 111+)**: Parse blocks in critical order, using collected references for inline link resolution
-  - Contains 43 helper methods following `is_*`/`parse_*`/`try_parse_*` naming convention
-  - `Parser` struct (line 5) holds only the `reference_definitions` HashMap - stateless for each parse call
-- `src/renderer.rs` (206 lines): Recursive pattern matching on `Node` → HTML with proper escaping
-- `src/lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String` + 6 unit tests for edge cases
-- `src/main.rs` (11 lines): CLI tool that reads stdin → outputs HTML
+- `src/ast.rs` (49 lines): Single `Node` enum with 18 variants representing the AST. All nodes are serializable via serde.
+- `src/parser.rs` (3,904 lines): **Two-phase parsing architecture** with 43 methods
+  - **Phase 1 (lines 17-146)**: Scan entire input to collect link reference definitions into `HashMap<String, (String, Option<String>)>`. Skips fenced/indented code blocks and recursively checks blockquotes where link refs can/can't appear.
+  - **Phase 2 (lines 147+)**: Parse blocks in critical order (see below), using collected references for inline link resolution.
+  - `Parser` struct holds only `reference_definitions` HashMap - stateless for each `parse()` call.
+  - **Naming convention**: `is_*` predicates, `parse_*` block parsers (return `(Node, usize)`), `try_parse_*` inline parsers (return `Option<(Node, usize)>`)
+- `src/renderer.rs` (206 lines): Recursive pattern matching on `Node` → HTML with proper escaping. All block elements output trailing `\n`.
+- `src/lib.rs` (65 lines): Public API `markdown_to_html(&str) -> String` + 6 unit tests for edge cases (entities, images, autolinks).
+- `src/main.rs` (11 lines): CLI tool that reads stdin → outputs HTML.
 
-**Quick Start**: `echo "**bold**" | cargo run` or `cargo test -- --nocapture` to see test results with diffs.
+**Quick Start**: `echo "**bold**" | cargo run` or `cargo test -- --nocapture` to see test results with diffs and coverage (currently 83.4%).
 
-## Critical Parser Order (src/parser.rs lines 111-400)
+## Critical Parser Order (src/parser.rs lines 147-400)
 
 After phase 1 collects link references, the `parse()` method checks blocks in this EXACT sequence to prevent misidentification:
-1. Link reference definitions (silent, don't produce blocks)
-2. ATX headings (before thematic breaks - `###` ambiguous)
-3. Thematic breaks (before lists)
-4. Blockquotes
-5. HTML blocks (7 types, before lists since tags look like markers)
-6. Lists (before code blocks)
-7. **Fenced code** (MUST precede indented - can have 0-3 space indent)
-8. Indented code blocks (4+ spaces)
-9. Blank lines (skip)
-10. Setext headings (lookahead to next line for underline)
-11. Paragraphs (fallback)
+1. Link reference definitions (lines 149-153, silent - don't produce blocks)
+2. ATX headings (lines 155-158, before thematic breaks since `###` is ambiguous)
+3. Thematic breaks (lines 160-163, before lists)
+4. Blockquotes (lines 165-168)
+5. HTML blocks (lines 170-173, 7 types, before lists since tags look like markers)
+6. Lists (lines 175-178, before code blocks)
+7. **Fenced code** (lines 180-183, MUST precede indented - can have 0-3 space indent)
+8. Indented code blocks (lines 185-188, 4+ spaces)
+9. Blank lines (lines 190-193, skip)
+10. Setext headings (lines 195-198, lookahead to next line for underline)
+11. Paragraphs (lines 200+, fallback)
 
-Reordering these causes cascading test failures.
+**Reordering these causes cascading test failures.** Each block type has precedence rules defined in the CommonMark spec.
 
 ## Adding Features (3-Step Pattern)
 
@@ -64,7 +64,7 @@ Reordering these causes cascading test failures.
 
 ## Essential Workflows
 
-**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 10 failures with example numbers + diffs + 83.2% coverage)
+**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 10 failures with example numbers + diffs + 83.4% coverage)
 
 **Fast iteration on specific sections** (bypass full test suite): 
 ```bash
@@ -95,10 +95,13 @@ jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn  # Count b
 
 ## Implementation Patterns
 
-**Parser method naming convention** (consistently used):
-- `is_*`: Predicate methods check if line/position matches pattern, return `bool` or `Option<T>`
-- `parse_*`: Consume input, return `(Node, usize)` where `usize` = lines/chars consumed
-- `try_parse_*`: Optional parsing for inline elements, return `Option<(Node, usize)>`
+**Parser method naming convention** (43 methods total - use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all):
+- `is_*` (20 methods): Predicate methods check if line/position matches pattern, return `bool` or `Option<T>`
+  - Examples: `is_indented_code_line()`, `is_thematic_break()`, `is_blockquote_start()`
+- `parse_*` (15 methods): Consume input, return `(Node, usize)` where `usize` = lines/chars consumed
+  - Examples: `parse_paragraph()`, `parse_blockquote()`, `parse_list()`
+- `try_parse_*` (14 methods): Optional parsing for inline elements, return `Option<(Node, usize)>`
+  - Examples: `try_parse_link()`, `try_parse_code_span()`, `try_parse_autolink()`
 
 **Lookahead pattern** (used in indented code blocks + setext headings):
 ```rust
@@ -110,21 +113,22 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 }
 ```
 
-**Renderer output patterns** (all include trailing `\n`):
+**Renderer output patterns** (all block elements include trailing `\n`):
 - Void elements: `<hr />\n`, `<br />\n`, `<img ... />\n`
 - Block elements: `<p>...</p>\n`, `<h1>...</h1>\n`, `<blockquote>\n...\n</blockquote>\n`
 - Lists: `<ul>\n...\n</ul>\n` (items render their own `\n`)
 - Conditional attributes: `<ol start="5">` only if start ≠ 1, `<code class="language-rust">` only if info string present
 
-**Tab handling**: Tabs expand to next multiple of 4 (NOT fixed 4 spaces). Partial tab removal in `remove_code_indent()` adds padding spaces.
+**Tab handling**: Tabs expand to **next multiple of 4** (NOT fixed 4 spaces). Partial tab removal in `remove_code_indent()` adds padding spaces.
 
-## Current Test Coverage (545/655 passing - 83.2%)
+## Current Test Coverage (546/655 passing - 83.4%)
 
-**Top failing sections** (110 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
+**Top failing sections** (109 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
 - ~~Link reference definitions in special contexts (multiline titles, inside blockquotes, paragraph interruption)~~ ✅ **100% complete (27/27)**
 - ~~Block quotes (lazy continuation, empty lines, fenced code interaction)~~ ✅ **100% complete (25/25)**
+- List items: 40/48 complete (83.3%) - remaining issues: empty items, multi-paragraph items, lazy continuation
 - Complex link scenarios (nested brackets, reference link edge cases)
-- Nested list indentation tracking
+- Emphasis and strong emphasis: 88/132 complete (66.7%) - nested emphasis delimiter matching
 - Tab handling in nested contexts (blockquotes, lists, code blocks)
 
 **Largest test sections**:
