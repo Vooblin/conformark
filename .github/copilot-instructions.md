@@ -1,11 +1,11 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 84.0% spec compliance (550/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 90.5% spec compliance (593/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture     # See test results + coverage (84.0%)
+cargo test -- --nocapture     # See test results + coverage (90.5%)
 echo "**bold**" | cargo run   # Test CLI parser
 cargo run --example test_emphasis  # Run 132 emphasis tests only
 ```
@@ -15,7 +15,7 @@ cargo run --example test_emphasis  # Run 132 emphasis tests only
 ## Architecture (5-File Core)
 
 - `src/ast.rs` (49 lines): Single `Node` enum with 18 variants representing the AST. All nodes are serializable via serde.
-- `src/parser.rs` (3,928 lines): **Two-phase parsing architecture** with 44 methods
+- `src/parser.rs` (3,941 lines): **Two-phase parsing architecture** with 45 methods
   - **Phase 1 (lines 17-146)**: Scan entire input to collect link reference definitions into `HashMap<String, (String, Option<String>)>`. Skips fenced/indented code blocks and recursively checks blockquotes where link refs can/can't appear.
   - **Phase 2 (lines 147+)**: Parse blocks in critical order (see below), using collected references for inline link resolution.
   - `Parser` struct holds only `reference_definitions` HashMap - stateless for each `parse()` call.
@@ -26,7 +26,7 @@ cargo run --example test_emphasis  # Run 132 emphasis tests only
 
 **Note**: Uses Rust edition 2024 (cutting edge). Line counts approximate and may drift with development.
 
-**Quick Start**: `echo "**bold**" | cargo run` or `cargo test -- --nocapture` to see test results with diffs and coverage (currently 84.0%).
+**Quick Start**: `echo "**bold**" | cargo run` or `cargo test -- --nocapture` to see test results with diffs and coverage (currently 90.5%).
 
 ## Critical Parser Order (src/parser.rs lines 147-400)
 
@@ -72,11 +72,11 @@ After phase 1 collects link references, the `parse()` method checks blocks in th
    }
    ```
 
-**Find parser methods**: `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` (shows 43 methods: ~20 `is_*` predicates, ~15 `parse_*` block parsers, ~8 `try_parse_*` inline parsers)
+**Find parser methods**: `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` (shows 45 methods: ~20 `is_*` predicates, ~15 `parse_*` block parsers, ~10 `try_parse_*` inline parsers)
 
 ## Essential Workflows
 
-**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 10 failures with example numbers + diffs + 84.0% coverage)
+**Run tests with diagnostics**: `cargo test -- --nocapture` (shows first 10 failures with example numbers + diffs + 90.5% coverage)
 
 **Fast iteration on specific sections** (bypass full test suite): 
 ```bash
@@ -110,12 +110,12 @@ jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn  # Count b
 
 ## Implementation Patterns
 
-**Parser method naming convention** (44 methods total - use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all):
+**Parser method naming convention** (45 methods total - use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all):
 - `is_*` (17 methods): Predicate methods check if line/position matches pattern, return `bool` or `Option<T>`
   - Examples: `is_indented_code_line()`, `is_thematic_break()`, `is_blockquote_start()`
 - `parse_*` (13 methods): Consume input, return `(Node, usize)` where `usize` = lines/chars consumed
   - Examples: `parse_paragraph()`, `parse_blockquote()`, `parse_list()`
-- `try_parse_*` (14 methods): Optional parsing for inline elements, return `Option<(Node, usize)>`
+- `try_parse_*` (15 methods): Optional parsing for inline elements, return `Option<(Node, usize)>`
   - Examples: `try_parse_link()`, `try_parse_code_span()`, `try_parse_autolink()`
 
 **Lookahead pattern** (used in indented code blocks + setext headings):
@@ -136,14 +136,14 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs expand to **next multiple of 4** (NOT fixed 4 spaces). Partial tab removal in `remove_code_indent()` adds padding spaces.
 
-## Current Test Coverage (550/655 passing - 84.0%)
+## Current Test Coverage (593/655 passing - 90.5%)
 
-**Top failing sections** (105 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
+**Top failing sections** (62 tests, find with `jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn`):
 - ~~Link reference definitions in special contexts (multiline titles, inside blockquotes, paragraph interruption)~~ ✅ **100% complete (27/27)**
 - ~~Block quotes (lazy continuation, empty lines, fenced code interaction)~~ ✅ **100% complete (25/25)**
+- ~~Emphasis and strong emphasis~~ ✅ **97.0% complete (128/132)** - only 4 complex nesting edge cases remain
 - List items: 43/48 complete (89.6%) - remaining issues: empty items, blockquote interactions
 - Complex link scenarios (nested brackets, reference link edge cases)
-- Emphasis and strong emphasis: 88/132 complete (66.7%) - nested emphasis delimiter matching
 - Tab handling in nested contexts (blockquotes, lists, code blocks)
 
 **Largest test sections**:
