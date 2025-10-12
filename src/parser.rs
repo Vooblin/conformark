@@ -1134,10 +1134,8 @@ impl Parser {
         }
 
         // Apply tight/loose formatting to all items
-        let formatted_items = if has_blank_between_items {
-            // Loose list - items keep their paragraph tags
-            items
-        } else {
+        let tight = !has_blank_between_items;
+        let formatted_items = if tight {
             // Tight list - unwrap single paragraphs from items
             items
                 .into_iter()
@@ -1155,13 +1153,20 @@ impl Parser {
                     other => other,
                 })
                 .collect()
+        } else {
+            // Loose list - items keep their paragraph tags
+            items
         };
 
         // Create the appropriate list node
         let list_node = match list_type {
-            ListType::Unordered(_) => Node::UnorderedList(formatted_items),
+            ListType::Unordered(_) => Node::UnorderedList {
+                tight,
+                children: formatted_items,
+            },
             ListType::Ordered(start, _) => Node::OrderedList {
                 start,
+                tight,
                 children: formatted_items,
             },
         };
