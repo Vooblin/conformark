@@ -73,6 +73,7 @@ fn render_node(node: &Node) -> String {
                         | Node::UnorderedList { .. }
                         | Node::OrderedList { .. }
                         | Node::ThematicBreak
+                        | Node::HtmlBlock(_)
                 )
             });
 

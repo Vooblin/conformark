@@ -4,16 +4,16 @@
 
 **TL;DR**: CommonMark parser in Rust. Add features by: (1) Add `Node` variant to `src/ast.rs`, (2) Add `is_*` predicate + `parse_*` method to `src/parser.rs` returning `(Node, usize)`, (3) Add pattern match to `src/renderer.rs`, (4) Run `cargo test -- --nocapture` to see coverage increase.
 
-**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,562 lines - order matters!).
+**Critical files**: `tests/data/tests.json` (655 spec tests across 26 sections), `assets/spec.txt` (9,811 line spec), `src/parser.rs` (3,658 lines - order matters!).
 
-**Current coverage**: 76.8% (503/655 tests passing)
+**Current coverage**: 79.7% (522/655 tests passing - updated Oct 2025)
 
 **Parser method patterns discovered (20+ methods):**
 - Predicate methods: `is_indented_code_line`, `is_fenced_code_start`, `is_thematic_break`, `is_blockquote_start`, `is_html_block_start`, `is_list_start`, `is_setext_underline`, `is_closing_fence`, `is_complete_tag_line`, `is_ascii_punctuation`
 - Parse methods: `parse_indented_code_block`, `parse_fenced_code_block`, `parse_atx_heading`, `parse_blockquote`, `parse_html_block`, `parse_setext_heading`, `parse_list`, `parse_list_item`, `parse_paragraph`, `parse_inline`
 - Helper methods: `count_indent_columns`, `remove_code_indent`, `try_parse_link_reference_definition`
 
-**Current status**: 76.8% coverage (503/655 tests passing). Main gaps: nested lists, full emphasis delimiter algorithm, remaining tab/indentation edge cases.
+**Current status**: 79.7% coverage (522/655 tests passing). Main gaps: link reference edge cases (multiline titles, angle bracket handling), link edge cases (complex scenarios, URL encoding), list item nesting with proper indentation tracking.
 
 ## Quick Start for AI Agents
 
@@ -36,9 +36,9 @@
 ## Project Architecture
 
 **Three-file core** (`src/ast.rs`, `src/parser.rs`, `src/renderer.rs`):
-- `ast.rs`: 18 `Node` enum variants with serde derives - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline)
-- `parser.rs`: 3,562 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
-- `renderer.rs`: 205 lines, recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
+- `ast.rs`: 18 `Node` enum variants with serde derives - Document, Paragraph, Heading, CodeBlock, ThematicBreak, BlockQuote, Lists, Inline nodes (Text, Code, Emphasis, Strong, Link, Image, HardBreak, HtmlBlock, HtmlInline) - 49 lines
+- `parser.rs`: 3,658 lines, stateful parser with `HashMap` for link references, two-phase parsing (blocks → inline)
+- `renderer.rs`: 206 lines, recursive pattern matching on `Node`, HTML escaping, special ListItem logic for block elements
 
 **Public API** (`src/lib.rs`, 64 lines): Single function `markdown_to_html(&str) -> String`
 
@@ -338,12 +338,12 @@ src/
 ## Common Pitfalls & Troubleshooting
 
 **Common Test Failure Patterns:**
-The majority of current failures (152/655 tests) fall into these categories:
-1. **Emphasis and strong emphasis**: Full delimiter run algorithm needed (56/132 tests failing)
+The majority of current failures (133/655 tests) fall into these categories:
+1. **Link reference definitions**: Multiline titles, angle bracket handling, whitespace normalization (27 tests total)
 2. **Link edge cases**: Complex link scenarios, reference definitions, URL encoding (90 tests total)
 3. **List items**: Nested lists with proper indentation tracking (48 tests total)
-4. **HTML blocks edge cases**: 3 failures remain - blank line interruption, list integration (43/46 passing)
-5. **Tab handling in nested contexts**: Tabs within blockquotes, lists, code blocks - partial tab expansion logic
+4. **Tab handling in nested contexts**: Tabs within blockquotes, lists, code blocks - partial tab expansion logic
+5. **Emphasis edge cases**: Remaining delimiter run algorithm nuances
 
 **Test Section Breakdown (by test count):**
 Top 10 sections with most tests (use `jq` to explore):
