@@ -1,3 +1,4 @@
+use crate::ast::Alignment;
 /// HTML renderer for CommonMark AST
 use crate::ast::Node;
 
@@ -208,6 +209,78 @@ fn render_node(node: &Node) -> String {
         Node::HardBreak => "<br />\n".to_string(),
         Node::HtmlBlock(content) => content.clone(), // Pass through raw HTML unchanged
         Node::HtmlInline(content) => content.clone(), // Pass through raw HTML unchanged
+        // GFM Tables
+        Node::Table {
+            alignments,
+            children,
+        } => {
+            let mut header_html = String::new();
+            let mut body_html = String::new();
+
+            // First row is header
+            if !children.is_empty() {
+                header_html = render_table_row(&children[0], alignments, true);
+            }
+
+            // Rest are body rows
+            for row in children.iter().skip(1) {
+                body_html.push_str(&render_table_row(row, alignments, false));
+            }
+
+            if body_html.is_empty() {
+                format!("<table>\n<thead>\n{}</thead>\n</table>\n", header_html)
+            } else {
+                format!(
+                    "<table>\n<thead>\n{}</thead>\n<tbody>\n{}</tbody>\n</table>\n",
+                    header_html, body_html
+                )
+            }
+        }
+        Node::TableRow(_) => {
+            // Should be handled by Table rendering
+            String::new()
+        }
+        Node::TableCell { .. } => {
+            // Should be handled by Table rendering
+            String::new()
+        }
+    }
+}
+
+fn render_table_row(node: &Node, alignments: &[Alignment], is_header: bool) -> String {
+    match node {
+        Node::TableRow(cells) => {
+            let cells_html: String = cells
+                .iter()
+                .enumerate()
+                .map(|(i, cell)| {
+                    render_table_cell(
+                        cell,
+                        alignments.get(i).unwrap_or(&Alignment::None),
+                        is_header,
+                    )
+                })
+                .collect();
+            format!("<tr>\n{}</tr>\n", cells_html)
+        }
+        _ => String::new(),
+    }
+}
+
+fn render_table_cell(node: &Node, alignment: &Alignment, is_header: bool) -> String {
+    match node {
+        Node::TableCell { children, .. } => {
+            let content: String = children.iter().map(render_node).collect();
+            let tag = if is_header { "th" } else { "td" };
+
+            match alignment {
+                Alignment::Left => format!("<{} align=\"left\">{}</{}>\n", tag, content, tag),
+                Alignment::Right => format!("<{} align=\"right\">{}</{}>\n", tag, content, tag),
+                Alignment::Center => format!("<{} align=\"center\">{}</{}>\n", tag, content, tag),
+                Alignment::None => format!("<{}>{}</{}>\n", tag, content, tag),
+            }
+        }
+        _ => String::new(),
     }
 }
 
