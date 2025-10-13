@@ -1,14 +1,14 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 99.1% spec compliance (649/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 99.2% spec compliance (650/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (99.1%)
+cargo test -- --nocapture                  # See test results + coverage (99.2%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
-cargo run --example check_failures        # Analyze 6 currently failing tests
+cargo run --example check_failures        # Analyze 5 currently failing tests
 ```
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
@@ -25,7 +25,7 @@ cargo run --example check_failures        # Analyze 6 currently failing tests
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
 - `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable for tooling/debugging—use `serde_json::to_string_pretty()` to inspect AST structure)
-- `parser.rs` (4,439 lines): Two-phase architecture with 45 methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
+- `parser.rs` (4,395 lines): Two-phase architecture with 45 methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
 - `renderer.rs` (241 lines): Pattern-matching HTML renderer
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter (`echo "text" | cargo run`)
@@ -134,14 +134,13 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 256 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (649/655 - 99.1%)
+## Current Test Coverage (650/655 - 99.2%)
 
-**Remaining failures** (6 tests across 2 categories):
+**Remaining failures** (5 tests across 2 categories):
 - **Lists** (1 test): Complex blockquote continuation in nested list structures (test 294)
-- **Links** (1 test): Link reference matching with parentheses edge case (test 570)
 - **Raw HTML** (4 tests): Complex edge cases involving multi-line tags and comments (tests 618, 627, 628, 631)
 
-**Recent progress** (Oct 2025): Improved from 98.6% to 99.1% (646→649 passing). Fixed soft line break handling: trailing spaces (0-1) before newlines are now properly stripped, matching CommonMark spec for soft breaks vs hard breaks (2+ spaces).
+**Recent progress** (Oct 2025): Improved from 99.1% to 99.2% (649→650 passing). Fixed link reference fallback: when inline link parsing fails (e.g., `[foo](invalid dest)`), parser now correctly falls back to trying shortcut reference link pattern, allowing `[foo]` to match a reference definition.
 
 ## Debugging Workflow
 
