@@ -140,6 +140,9 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 - **Lists** (1 test): Complex blockquote continuation in nested list structures (test 294)
 - **Links/Images** (3 tests): Whitespace handling at line boundaries (tests 558, 570, 589)
 - **Raw HTML** (6 tests): Invalid HTML tag validation—need to reject malformed tags like `<a h*#ref="hi">` (tests 621, 624, 626, 627, 628, 631)
+  - Complex issue: Involves interaction between HTML block type 7 detection (`is_complete_tag_line()`) and inline HTML parsing (`try_parse_html_inline()`)
+  - Type 7 blocks require complete tags on single lines, while inline HTML in paragraphs can span soft line breaks
+  - Fixing requires careful coordination between block and inline parsers
 
 **Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Use `cargo run --example check_failures` to see current failures.
 
