@@ -32,6 +32,7 @@ impl Parser {
         // FIRST PASS: Collect all link reference definitions
         // Skip lines that are inside code blocks or other contexts where link refs don't apply
         let mut i = 0;
+        let mut prev_was_ref_def = false;
         while i < lines.len() {
             let line = lines[i];
 
@@ -46,6 +47,7 @@ impl Parser {
                     }
                     i += 1;
                 }
+                prev_was_ref_def = false;
                 continue;
             }
 
@@ -70,6 +72,7 @@ impl Parser {
                     }
                     i += 1;
                 }
+                prev_was_ref_def = false;
                 continue;
             }
 
@@ -120,12 +123,14 @@ impl Parser {
                 }
 
                 i = j;
+                prev_was_ref_def = false;
                 continue;
             }
 
             // Link reference definitions cannot interrupt a paragraph
             // Check if previous line could be part of a paragraph (non-blank, not a block structure)
-            if i > 0 {
+            // Exception: if previous line was a ref def, we can have consecutive ref defs
+            if i > 0 && !prev_was_ref_def {
                 let prev_line = lines[i - 1];
                 let is_prev_blank = prev_line.trim().is_empty();
                 let is_prev_special = self.parse_atx_heading(prev_line).is_some()
@@ -140,6 +145,7 @@ impl Parser {
                 // Link refs cannot interrupt paragraphs
                 if !is_prev_blank && !is_prev_special {
                     i += 1;
+                    prev_was_ref_def = false;
                     continue;
                 }
             }
@@ -147,8 +153,10 @@ impl Parser {
             // Try to parse link reference definition
             if let Some(lines_consumed) = self.try_parse_link_reference_definition(&lines[i..]) {
                 i += lines_consumed;
+                prev_was_ref_def = true;
             } else {
                 i += 1;
+                prev_was_ref_def = false;
             }
         }
 
@@ -3125,10 +3133,22 @@ impl Parser {
         }
         i += 1; // Move past '['
 
-        // Find closing ']'
+        // Find closing ']' while checking for unescaped brackets
+        // Per spec: "Unescaped square bracket characters are not allowed inside link labels"
         let label_start = i;
-        while i < chars.len() && chars[i] != ']' {
-            i += 1;
+        while i < chars.len() {
+            if chars[i] == '\\' && i + 1 < chars.len() {
+                // Skip escaped character (including escaped brackets)
+                i += 2;
+            } else if chars[i] == '[' {
+                // Unescaped opening bracket - invalid label
+                return None;
+            } else if chars[i] == ']' {
+                // Found closing bracket
+                break;
+            } else {
+                i += 1;
+            }
         }
 
         if i >= chars.len() {
@@ -3146,6 +3166,12 @@ impl Parser {
             // Full reference: use explicit label
             Self::normalize_label(&raw_label)
         };
+
+        // Check if label is valid (must have at least one non-whitespace character)
+        // Per spec: "at least one character that is not a space, tab, or line ending"
+        if label.is_empty() {
+            return None;
+        }
 
         // Look up the reference definition
         if let Some((destination, title)) = self.reference_definitions.get(&label) {
@@ -3797,6 +3823,10 @@ impl Parser {
                     label_text.push(line_to_scan[j]);
                     label_text.push(line_to_scan[j + 1]);
                     j += 2;
+                } else if line_to_scan[j] == '[' {
+                    // Unescaped opening bracket - invalid label
+                    // Per spec: "Unescaped square bracket characters are not allowed inside link labels"
+                    return None;
                 } else if line_to_scan[j] == ']' {
                     // Found closing bracket
                     found_closing = true;
@@ -3833,6 +3863,12 @@ impl Parser {
         }
 
         let label = Self::normalize_label(&label_text);
+
+        // Check if label is valid (must have at least one non-whitespace character)
+        // Per spec: "at least one character that is not a space, tab, or line ending"
+        if label.is_empty() {
+            return None;
+        }
 
         // After ], must have :
         if !after_closing.starts_with(':') {
