@@ -647,11 +647,10 @@ impl Parser {
 
                 // Check if this line would allow lazy continuation
                 // Blank lines don't allow lazy continuation (end paragraphs)
-                // Lists, code blocks, etc. don't allow lazy continuation
-                // Only paragraphs (and similar inline content) allow it
+                // Fenced code blocks, thematic breaks, headings, and HTML blocks don't allow lazy continuation
+                // But lists DO allow lazy continuation (their items can have lazy lines)
                 last_line_allows_lazy = !stripped.trim().is_empty()
                     && !self.is_indented_code_line(&stripped)
-                    && self.is_list_start(&stripped).is_none()
                     && self.is_fenced_code_start(&stripped).is_none()
                     && !self.is_thematic_break(&stripped)
                     && self.parse_atx_heading(&stripped).is_none()
@@ -782,9 +781,8 @@ impl Parser {
         // 1. Thematic breaks (always start new blocks)
         // 2. ATX headings (always start new blocks)
         // 3. Fenced code blocks (need explicit markers)
-
-        // However, indented content and list markers CAN lazy-continue
-        // because they could be literal text in a paragraph context.
+        // 4. List markers at the current level (would be new list items)
+        // 5. HTML blocks (interrupt paragraphs)
 
         // Thematic break
         if self.is_thematic_break(line) {
@@ -801,12 +799,17 @@ impl Parser {
             return false;
         }
 
+        // List markers - these would start new list items, not lazy continue
+        if self.is_list_start(line).is_some() {
+            return false;
+        }
+
         // HTML blocks - these interrupt paragraphs
         if self.is_html_block_start(line).is_some() {
             return false;
         }
 
-        // Otherwise, can lazy continue (including indented code and list markers)
+        // Otherwise, can lazy continue (including indented code which could be literal text)
         true
     }
 
