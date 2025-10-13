@@ -5,12 +5,15 @@ A CommonMark v0.31.2 parser in Rust (edition 2024) with 96.2% spec compliance (6
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture     # See test results + coverage (96.2%)
-echo "**bold**" | cargo run   # Test CLI parser
-cargo run --example test_emphasis  # Run 132 emphasis tests (100% passing!)
+cargo test -- --nocapture                  # See test results + coverage (96.2%)
+echo "**bold**" | cargo run                # Test CLI parser
+cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
+cargo run --example check_failures        # Analyze specific failing tests
 ```
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
+
+**Finding methods?** Use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all parser methods with line numbers.
 
 ## Project Philosophy
 
@@ -69,29 +72,31 @@ cargo run --example test_emphasis  # Run 132 emphasis tests (100% passing!)
 
 ## Essential Workflows
 
-**Run tests**: `cargo test -- --nocapture` (shows first 5 failures with diffs + coverage stats)
+**Run all tests**: `cargo test -- --nocapture` (shows first 5 failures with diffs + coverage stats)
 
-**Fast iteration on specific sections**:
+**Fast iteration on specific sections** (8 example runners in `examples/`):
 ```bash
-cargo run --example test_emphasis      # 132 emphasis tests
+cargo run --example test_emphasis      # 132 emphasis tests (100% passing)
 cargo run --example test_list_items    # 48 list item tests
 cargo run --example test_blockquotes   # 25 blockquote tests
-# Pattern: Copy examples/test_emphasis.rs, change .section filter
+cargo run --example check_failures     # Analyze currently failing tests
+# Pattern: Each example filters tests.json by .section field
 ```
 
 **Query test data** (requires `jq`):
 ```bash
-jq '.[] | select(.example == 281)' tests/data/tests.json  # Find specific test
-jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn  # Count by section
+jq '.[] | select(.example == 281)' tests/data/tests.json              # Get test #281
+jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn # Count by section
+jq '[.[] | select(.section == "Lists")] | length' tests/data/tests.json # Section size
 ```
 
-**Manual testing**: `echo "**bold**" | cargo run`
+**Manual testing**: `echo "**bold**" | cargo run` (stdin → HTML)
 
-**CI requirements** (3 toolchains: stable/beta/nightly in `.github/workflows/ci.yml`):
-- `cargo fmt --all -- --check`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo doc --no-deps`
-- `cargo test --verbose`
+**CI requirements** (3 toolchains: stable/beta/nightly, see `.github/workflows/ci.yml`):
+- `cargo fmt --all -- --check` - Enforce formatting
+- `cargo clippy --all-targets --all-features -- -D warnings` - No warnings allowed
+- `cargo doc --no-deps` - Documentation must build
+- `cargo test --verbose` - Tests always pass (non-blocking harness)
 
 ## Implementation Patterns
 
@@ -118,12 +123,12 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 ## Current Test Coverage (630/655 - 96.2%)
 
-**Remaining failures** (25 tests):
-- Links: Multi-line destinations, HTML tag interference in link text
-- Lists: Complex blockquote interactions, edge cases in tight/loose detection
-- Code spans: Backtick edge cases
+**Remaining failures** (25 tests across 3 categories):
+- **Links**: Multi-line destinations, HTML tag interference in link text
+- **Lists**: Complex blockquote interactions, edge cases in tight/loose detection  
+- **Code spans**: Backtick edge cases with unusual spacing
 
-**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Failed examples: [294, 302, 318, 512, 526, 528, 538, 540, 542, 548]...
+**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Use `cargo run --example check_failures` to see current failures.
 
 **Recent progress** (Oct 2025): Improved from 95.9% to 96.2% (628→630 passing). Fixed URI encoding to preserve percent-encoded sequences and handle Unicode whitespace correctly in link destinations.
 
