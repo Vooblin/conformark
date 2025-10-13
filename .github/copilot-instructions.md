@@ -19,19 +19,19 @@ cargo run --example test_emphasis  # Run 132 emphasis tests (100% passing!)
 ## Architecture Overview
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
-- `ast.rs` (~52 lines): Single `Node` enum with 18 variants (all `serde` serializable)
-- `parser.rs` (~4,250 lines): Two-phase architecture with 44+ methods
-- `renderer.rs` (~241 lines): Pattern-matching HTML renderer
-- `lib.rs` (~64 lines): Public API `markdown_to_html(&str) -> String`
-- `main.rs` (~11 lines): CLI stdin→HTML converter
+- `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable)
+- `parser.rs` (4,296 lines): Two-phase architecture with 44+ methods
+- `renderer.rs` (241 lines): Pattern-matching HTML renderer
+- `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
+- `main.rs` (11 lines): CLI stdin→HTML converter
 
-**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-237) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
+**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-240) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
 **Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2102-2498). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking.
 
 ## Critical Block Parsing Order
 
-**`src/parser.rs` lines 154-237** defines block precedence. **Reordering breaks tests.** The `parse()` method checks in this EXACT sequence:
+**`src/parser.rs` lines 154-240** defines block precedence. **Reordering breaks tests.** The `parse()` method checks in this EXACT sequence:
 
 1. Link reference definitions (skip, already collected)
 2. ATX headings (`##`, before `###` thematic breaks)
@@ -138,7 +138,7 @@ When tests fail after changes:
 
 ## Common Pitfalls
 
-1. **Block order violations**: Adding block type in wrong position in `parse()` method (lines 154-237) breaks existing tests. The order is load-bearing.
+1. **Block order violations**: Adding block type in wrong position in `parse()` method (lines 154-240) breaks existing tests. The order is load-bearing.
 2. **Tab expansion**: Tabs are NOT 4 spaces - use `count_indent_columns()` which advances to next multiple of 4 (e.g., tab at column 2 → column 4, at column 5 → column 8)
 3. **Link refs**: Case-insensitive (`[FOO]` matches `[foo]`), whitespace-collapsed, stored in phase 1. Normalize with `.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")` pattern.
 4. **Setext headings**: Must lookahead (line 212) before committing to paragraph parse, otherwise underline becomes separate paragraph

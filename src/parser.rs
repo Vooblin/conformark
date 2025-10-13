@@ -962,15 +962,13 @@ impl Parser {
             return false;
         }
 
-        // Don't match autolinks - they start with < followed by scheme:
-        // Check for common URL schemes to avoid false positives
-        if trimmed.len() > 5 {
-            let after_bracket = &trimmed[1..];
-            if after_bracket.starts_with("http://")
-                || after_bracket.starts_with("https://")
-                || after_bracket.starts_with("ftp://")
-                || after_bracket.starts_with("mailto:")
-            {
+        // Don't match potential autolinks - let inline parser handle them
+        // Autolinks are <URI> or <email>, where URIs contain : and emails contain @
+        if trimmed.ends_with('>') && trimmed.len() > 2 {
+            let content = &trimmed[1..trimmed.len() - 1];
+            // If it contains : or @ (possible autolink), don't treat as HTML block
+            // The inline parser will validate and either create autolink or escape it
+            if content.contains(':') || content.contains('@') {
                 return false;
             }
         }
@@ -1015,14 +1013,40 @@ impl Parser {
         let tag_part = tag_content.strip_prefix('/').unwrap_or(tag_content);
 
         // Extract just the tag name (before space or other attributes)
-        if let Some(first_char) = tag_part.chars().next() {
-            // Tag name must start with ASCII letter
-            if first_char.is_ascii_alphabetic() {
-                return true;
+        // Tag names can only contain ASCII letters, digits, and hyphens
+        let tag_name_end = tag_part
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .unwrap_or(tag_part.len());
+
+        if tag_name_end == 0 {
+            return false; // Empty tag name
+        }
+
+        let tag_name = &tag_part[..tag_name_end];
+
+        // Tag name must start with ASCII letter
+        if let Some(first_char) = tag_name.chars().next() {
+            if !first_char.is_ascii_alphabetic() {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // After tag name, we should only have whitespace, '/', or '>'
+        // Anything else (like '.' in '<foo.bar>') makes it invalid
+        if tag_name_end < tag_part.len() {
+            let after_tag_name = &tag_part[tag_name_end..];
+            // First character after tag name must be whitespace, '/', or nothing (end of tag_part)
+            if let Some(ch) = after_tag_name.chars().next()
+                && !ch.is_whitespace()
+                && ch != '/'
+            {
+                return false; // Invalid character after tag name
             }
         }
 
-        false
+        true
     }
 
     /// Parse an HTML block of the given type
@@ -3652,10 +3676,21 @@ impl Parser {
     }
 
     fn url_encode_autolink(&self, text: &str) -> String {
-        // Percent-encode special characters per CommonMark spec
-        // Backslashes become %5C (backslash-escapes don't work in autolinks)
-        // Backticks become %60
-        text.replace('\\', "%5C").replace('`', "%60")
+        // Percent-encode characters per CommonMark spec and RFC 3986
+        // Backslash-escapes don't work in autolinks, so '\[' is two chars: '\' and '['
+        // Both should be percent-encoded
+        // Safe characters (don't encode): A-Za-z0-9 and -._~:/?#[]@!$&'()*+,;=
+        // Note: We encode fewer chars to preserve valid URL structure
+        text.chars()
+            .map(|c| match c {
+                'A'..='Z' | 'a'..='z' | '0'..='9' => c.to_string(),
+                '-' | '.' | '_' | '~' => c.to_string(), // Unreserved chars
+                ':' | '/' | '?' | '#' | '@' => c.to_string(), // URL structure
+                '!' | '$' | '&' | '\'' | '(' | ')' | '*' | '+' | ',' | ';' | '=' => c.to_string(), // Sub-delims
+                // Percent-encode everything else, including backslash, brackets, etc.
+                _ => format!("%{:02X}", c as u8),
+            })
+            .collect()
     }
 
     /// Try to parse a link reference definition
@@ -4137,6 +4172,21 @@ impl Parser {
                 return Some((Node::HtmlInline(html), i));
             }
             return None;
+        }
+
+        // Before checking for Type 6 (open tags), exclude potential autolinks
+        // Autolinks are <URI> or <email> where URIs contain : and emails contain @
+        // Check if this looks like a potential autolink that should be handled by try_parse_autolink
+        let mut temp_i = i;
+        while temp_i < chars.len() && chars[temp_i] != '>' && chars[temp_i] != '\n' {
+            temp_i += 1;
+        }
+        if temp_i < chars.len() && chars[temp_i] == '>' {
+            let content: String = chars[i..temp_i].iter().collect();
+            if content.contains(':') || content.contains('@') {
+                // Looks like a potential autolink, don't treat as HTML
+                return None;
+            }
         }
 
         // Type 6: Open tag <tagname attributes...> or <tagname attributes.../>
