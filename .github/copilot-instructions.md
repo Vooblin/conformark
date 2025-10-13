@@ -1,14 +1,14 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 98.6% spec compliance (646/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 99.1% spec compliance (649/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (98.6%)
+cargo test -- --nocapture                  # See test results + coverage (99.1%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
-cargo run --example check_failures        # Analyze 9 currently failing tests
+cargo run --example check_failures        # Analyze 6 currently failing tests
 ```
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
@@ -90,7 +90,7 @@ cargo run --example test_blockquotes   # 25 blockquote tests
 cargo run --example test_hard_breaks   # Test hard line breaks
 cargo run --example test_html_blocks   # Test HTML block parsing
 cargo run --example test_link_refs     # Test link reference definitions
-cargo run --example check_failures     # Analyze 13 currently failing tests with diffs
+cargo run --example check_failures     # Analyze 6 currently failing tests with diffs
 cargo run --example test_169           # Single-test runner (example pattern)
 # Pattern: Each example filters tests.json by .section or .example field
 # Create new examples by copying the pattern from existing ones
@@ -134,15 +134,14 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 256 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (646/655 - 98.6%)
+## Current Test Coverage (649/655 - 99.1%)
 
-**Remaining failures** (9 tests across 3 categories):
+**Remaining failures** (6 tests across 2 categories):
 - **Lists** (1 test): Complex blockquote continuation in nested list structures (test 294)
-- **Links/Images** (3 tests): Whitespace handling at line boundaries (tests 558, 570, 589)
+- **Links** (1 test): Link reference matching with parentheses edge case (test 570)
 - **Raw HTML** (4 tests): Complex edge cases involving multi-line tags and comments (tests 618, 627, 628, 631)
-- **Soft line breaks** (1 test): Trailing space handling (test 652)
 
-**Recent progress** (Oct 2025): Improved from 98.0% to 98.6% (642→646 passing). Fixed HTML tag validation: reject closing tags with attributes (`</a href="foo">`), require whitespace between attributes (`href='bar'title=title` is invalid), allow newlines in quoted attribute values for multi-line tags.
+**Recent progress** (Oct 2025): Improved from 98.6% to 99.1% (646→649 passing). Fixed soft line break handling: trailing spaces (0-1) before newlines are now properly stripped, matching CommonMark spec for soft breaks vs hard breaks (2+ spaces).
 
 ## Debugging Workflow
 
