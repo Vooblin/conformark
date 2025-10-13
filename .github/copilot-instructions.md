@@ -25,7 +25,7 @@ cargo run --example check_failures        # Analyze specific failing tests
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
 - `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable for tooling/debugging—use `serde_json::to_string_pretty()` to inspect AST structure)
-- `parser.rs` (4,404 lines): Two-phase architecture with 45+ methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
+- `parser.rs` (4,439 lines): Two-phase architecture with 45 methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
 - `renderer.rs` (241 lines): Pattern-matching HTML renderer
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter (`echo "text" | cargo run`)
@@ -90,8 +90,9 @@ cargo run --example test_blockquotes   # 25 blockquote tests
 cargo run --example test_hard_breaks   # Test hard line breaks
 cargo run --example test_html_blocks   # Test HTML block parsing
 cargo run --example test_link_refs     # Test link reference definitions
-cargo run --example check_failures     # Analyze currently failing tests
-# Pattern: Each example filters tests.json by .section field
+cargo run --example check_failures     # Analyze 13 currently failing tests with diffs
+cargo run --example test_169           # Single-test runner (example pattern)
+# Pattern: Each example filters tests.json by .section or .example field
 # Create new examples by copying the pattern from existing ones
 ```
 
@@ -136,9 +137,9 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 ## Current Test Coverage (642/655 - 98.0%)
 
 **Remaining failures** (13 tests across 3 categories):
-- **Lists**: Complex blockquote continuation in nested structures (1 test)
-- **Links/Images**: Whitespace handling edge cases (3 tests)
-- **Raw HTML**: Invalid HTML tag validation (6 tests, need to reject malformed tags)
+- **Lists** (1 test): Complex blockquote continuation in nested list structures (test 294)
+- **Links/Images** (3 tests): Whitespace handling at line boundaries (tests 558, 570, 589)
+- **Raw HTML** (6 tests): Invalid HTML tag validation—need to reject malformed tags like `<a h*#ref="hi">` (tests 621, 624, 626, 627, 628, 631)
 
 **Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Use `cargo run --example check_failures` to see current failures.
 
