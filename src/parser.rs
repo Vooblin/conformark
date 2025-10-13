@@ -4323,8 +4323,9 @@ impl Parser {
                 i += 1;
             }
 
-            // Skip whitespace before =
+            // Peek ahead: skip whitespace to check for =
             newline_seen = false;
+            let pos_after_attr_name = i;
             while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t' || chars[i] == '\n') {
                 if chars[i] == '\n' {
                     if newline_seen {
@@ -4337,7 +4338,7 @@ impl Parser {
 
             // Check for attribute value
             if i < chars.len() && chars[i] == '=' {
-                i += 1;
+                i += 1; // Skip the =
 
                 // Skip whitespace after =
                 newline_seen = false;
@@ -4407,8 +4408,12 @@ impl Parser {
                         i += 1;
                     }
                 }
+            } else {
+                // No '=' found - this is a boolean attribute (attribute without value)
+                // Restore position to right after attribute name so whitespace is consumed in next iteration
+                i = pos_after_attr_name;
             }
-            // Attribute without value is OK, continue to next attribute or tag end
+            // Continue to next attribute or tag end
         }
     }
 }

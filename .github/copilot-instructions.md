@@ -1,14 +1,14 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with **99.7% spec compliance** (653/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with **99.8% spec compliance** (654/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (99.7%)
+cargo test -- --nocapture                  # See test results + coverage (99.8%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
-cargo run --example check_failures        # Analyze 2 currently failing tests
+cargo run --example check_failures        # Analyze 1 currently failing test
 ```
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
@@ -25,8 +25,8 @@ cargo run --example check_failures        # Analyze 2 currently failing tests
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
 - `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable for tooling/debugging—use `serde_json::to_string_pretty()` to inspect AST structure)
-- `parser.rs` (4,401 lines): Two-phase architecture with 45+ methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
-- `renderer.rs` (242 lines): Pattern-matching HTML renderer
+- `parser.rs` (4,414 lines): Two-phase architecture with 45 methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
+- `renderer.rs` (241 lines): Pattern-matching HTML renderer
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter (`echo "text" | cargo run`)
 
@@ -134,13 +134,12 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 256 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (653/655 - 99.7%)
+## Current Test Coverage (654/655 - 99.8%)
 
-**Remaining failures** (2 tests):
-- **Lists** (1 test): Complex blockquote continuation in nested list structures (test 294)
-- **Raw HTML** (1 test): Multi-line tag with complex attributes and embedded tags (test 618)
+**Remaining failure** (1 test):
+- **Lists** (1 test): Complex blockquote continuation in nested list structures (test 294) - lazy continuation of blockquote inside list item
 
-**Recent progress** (Oct 2025): Improved from 99.2% to 99.7% (650→653 passing). Fixed CDATA sections, HTML comments with special patterns (<!-->, <!--->), multi-line comment support, and improved autolink detection to avoid false positives with HTML tags containing colons in attributes.
+**Recent progress** (Oct 2025): Improved from 99.2% to 99.8% (650→654 passing). Fixed CDATA sections, HTML comments with special patterns (<!-->, <!--->), multi-line comment support, improved autolink detection, and complex multi-line HTML inline tags with boolean attributes and embedded tags in attribute values.
 
 ## Debugging Workflow
 
