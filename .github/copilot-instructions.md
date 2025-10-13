@@ -1,11 +1,11 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 96.2% spec compliance (630/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 96.5% spec compliance (632/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (96.2%)
+cargo test -- --nocapture                  # See test results + coverage (96.5%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
 cargo run --example check_failures        # Analyze specific failing tests
@@ -121,16 +121,16 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (630/655 - 96.2%)
+## Current Test Coverage (632/655 - 96.5%)
 
-**Remaining failures** (25 tests across 3 categories):
-- **Links**: Multi-line destinations, HTML tag interference in link text
-- **Lists**: Complex blockquote interactions, edge cases in tight/loose detection  
+**Remaining failures** (23 tests across 3 categories):
+- **Links**: Multi-line destinations, HTML tag interference in link text, Unicode case folding
+- **Lists**: Complex blockquote interactions, setext heading rendering edge cases
 - **Code spans**: Backtick edge cases with unusual spacing
 
 **Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Use `cargo run --example check_failures` to see current failures.
 
-**Recent progress** (Oct 2025): Improved from 95.9% to 96.2% (628→630 passing). Fixed URI encoding to preserve percent-encoded sequences and handle Unicode whitespace correctly in link destinations.
+**Recent progress** (Oct 2025): Improved from 96.3% to 96.5% (631→632 passing). Fixed tight/loose list detection to properly handle items containing multiple block-level elements with blank lines between them (CommonMark spec §5.3).
 
 ## Debugging Workflow
 

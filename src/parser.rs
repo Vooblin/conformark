@@ -1320,6 +1320,7 @@ impl Parser {
         let mut items = Vec::new();
         let mut i = 0;
         let mut has_blank_between_items = false;
+        let mut any_item_has_multiple_blocks = false;
 
         while i < lines.len() {
             // Check for thematic break first - it can interrupt a list
@@ -1351,14 +1352,16 @@ impl Parser {
                 }
 
                 // Parse this list item (multi-line support)
-                let (item, consumed, _item_has_multiple_blocks) =
+                let (item, consumed, item_has_multiple_blocks) =
                     self.parse_list_item(&lines[i..], &current_type);
                 items.push(item);
                 i += consumed;
 
-                // Note: item_has_multiple_blocks affects only that item's tightness,
-                // not the list-level tightness. List-level tightness is determined
-                // only by blank lines BETWEEN list items, not within them.
+                // Per CommonMark spec: A list is loose if ANY item directly contains
+                // two block-level elements with a blank line between them
+                if item_has_multiple_blocks {
+                    any_item_has_multiple_blocks = true;
+                }
 
                 // Check for blank lines after this item
                 if i < lines.len() && lines[i].trim().is_empty() {
@@ -1429,7 +1432,10 @@ impl Parser {
         }
 
         // Determine list-level tightness
-        let list_is_tight = !has_blank_between_items;
+        // Per CommonMark spec: A list is loose if:
+        // 1. Any items are separated by blank lines, OR
+        // 2. Any item directly contains two block-level elements with a blank line between them
+        let list_is_tight = !has_blank_between_items && !any_item_has_multiple_blocks;
 
         // In a loose list, all items must render loosely (with <p> tags)
         // In a tight list, items render based on their individual tightness
