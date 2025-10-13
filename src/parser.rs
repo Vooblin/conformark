@@ -2332,15 +2332,24 @@ impl Parser {
                     continue;
                 }
 
-                // Check modulo-3 rule (Rule 9/10)
-                let both_can_open_and_close = opener.can_close && closer.can_open;
-                if both_can_open_and_close {
-                    let sum = opener.count + closer.count;
-                    if sum.is_multiple_of(3)
-                        && !(opener.count.is_multiple_of(3) && closer.count.is_multiple_of(3))
-                    {
-                        continue;
-                    }
+                // Check if this is a valid match according to CommonMark spec
+                // A match is valid if ANY of these conditions are true:
+                // 1. The closer is not a potential opener AND the opener is not a potential closer
+                // 2. The closer's original length is a multiple of 3
+                // 3. The sum of original lengths is NOT a multiple of 3
+
+                let closer_can_open = delimiter_stack[closer_idx].can_open;
+                let opener_can_close = opener.can_close;
+                let closer_count = delimiter_stack[closer_idx].count;
+                let opener_count = opener.count;
+
+                let condition_1 = !closer_can_open && !opener_can_close;
+                let condition_2 = closer_count.is_multiple_of(3);
+                let condition_3 = !(opener_count + closer_count).is_multiple_of(3);
+
+                if !condition_1 && !condition_2 && !condition_3 {
+                    // Not a valid match, continue searching
+                    continue;
                 }
 
                 // Found a match!
