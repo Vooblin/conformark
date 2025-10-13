@@ -2898,6 +2898,26 @@ impl Parser {
                 continue;
             }
 
+            // Check for autolinks and HTML tags (they also take precedence)
+            if chars[i] == '<' {
+                i += 1;
+
+                // Try to match until '>' or newline
+                while i < chars.len() && chars[i] != '>' && chars[i] != '\n' && chars[i] != '<' {
+                    i += 1;
+                }
+
+                // If we found '>', this could be an autolink or HTML tag
+                if i < chars.len() && chars[i] == '>' {
+                    i += 1; // Move past '>'
+                    continue;
+                }
+
+                // If we didn't find closing '>', this is an unclosed tag/autolink
+                // which prevents the link from parsing
+                return None;
+            }
+
             if chars[i] == '[' {
                 bracket_depth += 1;
             } else if chars[i] == ']' {

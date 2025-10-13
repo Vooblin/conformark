@@ -17,7 +17,7 @@ fn main() {
     let test_data = fs::read_to_string("tests/data/tests.json").unwrap();
     let tests: Vec<SpecTest> = serde_json::from_str(&test_data).unwrap();
 
-    let failing_examples = [294, 302, 318, 349, 505, 509, 512, 520, 521, 522];
+    let failing_examples = [294, 548, 554, 558, 567, 570, 572, 589, 621, 624];
 
     for &example in &failing_examples {
         if let Some(test) = tests.iter().find(|t| t.example == example) {
