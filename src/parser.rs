@@ -2272,8 +2272,10 @@ impl Parser {
                         i += 1; // consume the newline
                         continue;
                     } else {
-                        // Normal text with newline - include the newline in text
-                        nodes.push(Node::Text(text));
+                        // Soft line break - remove trailing spaces (0-1), keep newline
+                        if trimmed_end > 0 {
+                            nodes.push(Node::Text(text[..trimmed_end].to_string()));
+                        }
                         nodes.push(Node::Text("\n".to_string()));
                         i += 1;
                         continue;
