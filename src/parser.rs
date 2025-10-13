@@ -1327,15 +1327,14 @@ impl Parser {
                 }
 
                 // Parse this list item (multi-line support)
-                let (item, consumed, item_has_multiple_blocks) =
+                let (item, consumed, _item_has_multiple_blocks) =
                     self.parse_list_item(&lines[i..], &current_type);
                 items.push(item);
                 i += consumed;
 
-                // Item contains multiple blocks separated by blanks makes list loose
-                if item_has_multiple_blocks {
-                    has_blank_between_items = true;
-                }
+                // Note: item_has_multiple_blocks affects only that item's tightness,
+                // not the list-level tightness. List-level tightness is determined
+                // only by blank lines BETWEEN list items, not within them.
 
                 // Check for blank lines after this item
                 if i < lines.len() && lines[i].trim().is_empty() {
@@ -1568,6 +1567,32 @@ impl Parser {
 
         // Parse the collected lines as blocks
         let item_content = item_lines.join("\n");
+
+        // Check if there's a blank line at the top level of this item's content
+        // Heuristic: A blank line before any nested list marker indicates top-level separation
+        let has_top_level_blank = {
+            let mut found_blank = false;
+            let mut found_list_marker = false;
+            let mut result = false;
+            for line in item_lines.iter() {
+                // Check if this line starts a list
+                if self.is_list_start(line).is_some() {
+                    found_list_marker = true;
+                }
+                if line.trim().is_empty() {
+                    if !found_list_marker {
+                        // Blank line before any list marker - this is top-level
+                        found_blank = true;
+                    }
+                } else if found_blank {
+                    // Found content after a top-level blank
+                    result = true;
+                    break;
+                }
+            }
+            result
+        };
+
         let parsed = self.parse(&item_content);
 
         // Extract children from the parsed document
@@ -1581,29 +1606,33 @@ impl Parser {
             .filter(|c| matches!(c, Node::Paragraph(_)))
             .count();
 
-        // An item has multiple blocks with blanks between them if:
-        // - It has 2+ paragraphs (must have blank between paragraphs), OR
-        // - It has other combinations that likely had blanks based on CommonMark rules
-        //
-        // Strategy: Be conservative - only mark as having blanks between blocks if we're sure
-        // Lists can follow other blocks without blank lines, so don't count them
-        // Code blocks and block quotes typically need blank lines
-        let para_or_special_count = children
+        // Determine if this item should render tightly
+        // Per CommonMark spec: An item is loose if it contains blank lines between blocks
+        // Use top-level blank detection instead of _has_blank to avoid counting blanks inside nested structures
+
+        // Count all block-level children
+        let block_count = children
             .iter()
             .filter(|c| {
                 matches!(
                     c,
-                    Node::Paragraph(_) | Node::CodeBlock { .. } | Node::BlockQuote(_)
+                    Node::Paragraph(_)
+                        | Node::CodeBlock { .. }
+                        | Node::BlockQuote(_)
+                        | Node::UnorderedList { .. }
+                        | Node::OrderedList { .. }
+                        | Node::Heading { .. }
+                        | Node::ThematicBreak
+                        | Node::HtmlBlock(_)
                 )
             })
             .count();
 
         let has_multiple_blocks_with_blanks =
-            paragraph_count >= 2 || (_has_blank && para_or_special_count >= 2);
+            paragraph_count >= 2 || (has_top_level_blank && block_count >= 2);
 
-        // Determine if this specific item should render tightly
-        // Same logic
-        let item_is_tight = !(paragraph_count >= 2 || (_has_blank && para_or_special_count >= 2));
+        // Item is loose if it has multiple paragraphs, or has top-level blank + multiple blocks
+        let item_is_tight = !has_multiple_blocks_with_blanks;
 
         let item = Node::ListItem {
             tight: item_is_tight,
