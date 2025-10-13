@@ -3030,8 +3030,8 @@ impl Parser {
             }
         }
 
-        // Skip whitespace between destination and title (including Unicode whitespace)
-        while i < chars.len() && chars[i].is_whitespace() && chars[i] != '\n' && chars[i] != '\r' {
+        // Skip whitespace between destination and title (including newlines per spec)
+        while i < chars.len() && chars[i].is_whitespace() {
             i += 1;
         }
 
@@ -3289,8 +3289,8 @@ impl Parser {
             }
         }
 
-        // Skip whitespace between destination and title (including Unicode whitespace)
-        while i < chars.len() && chars[i].is_whitespace() && chars[i] != '\n' && chars[i] != '\r' {
+        // Skip whitespace between destination and title (including newlines per spec)
+        while i < chars.len() && chars[i].is_whitespace() {
             i += 1;
         }
 
