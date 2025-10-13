@@ -1,14 +1,14 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with **99.8% spec compliance** (654/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with **100% spec compliance** (655/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (99.8%)
+cargo test -- --nocapture                  # See test results + coverage (100%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
-cargo run --example check_failures        # Analyze 1 currently failing test
+cargo run --example check_failures        # Analyze any failing tests
 ```
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
@@ -25,7 +25,7 @@ cargo run --example check_failures        # Analyze 1 currently failing test
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
 - `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable for tooling/debugging—use `serde_json::to_string_pretty()` to inspect AST structure)
-- `parser.rs` (4,414 lines): Two-phase architecture with 45 methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
+- `parser.rs` (4,419 lines): Two-phase architecture with 45 methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
 - `renderer.rs` (241 lines): Pattern-matching HTML renderer
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter (`echo "text" | cargo run`)
@@ -36,7 +36,7 @@ cargo run --example check_failures        # Analyze 1 currently failing test
 - `unicode-casefold` (v0.2.0): Unicode case folding for link reference normalization (e.g., `[ẞ]` matches `[SS]`)
 - `test-fuzz` (dev): Fuzz testing infrastructure (not yet actively used)
 
-**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 32-161 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks, blockquotes processed recursively). Phase 2 (lines 163-236) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
+**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 32-162 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks, blockquotes processed recursively). Phase 2 (lines 163-236) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
 **Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2086-2850). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` (line 2303) to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking. The `DelimiterRun` struct (lines 7-15) tracks position, count, flanking rules, and active status for each delimiter run.
 
@@ -82,7 +82,7 @@ cargo run --example check_failures        # Analyze 1 currently failing test
 
 **Run all tests**: `cargo test -- --nocapture` (shows first 5 failures with diffs + coverage stats)
 
-**Fast iteration on specific sections** (8 example runners in `examples/`):
+**Fast iteration on specific sections** (10 example runners in `examples/`):
 ```bash
 cargo run --example test_emphasis      # 132 emphasis tests (100% passing)
 cargo run --example test_list_items    # 48 list item tests
@@ -90,8 +90,10 @@ cargo run --example test_blockquotes   # 25 blockquote tests
 cargo run --example test_hard_breaks   # Test hard line breaks
 cargo run --example test_html_blocks   # Test HTML block parsing
 cargo run --example test_link_refs     # Test link reference definitions
-cargo run --example check_failures     # Analyze 2 currently failing tests with diffs
+cargo run --example check_failures     # Analyze any failing tests with diffs
 cargo run --example test_169           # Single-test runner (example pattern)
+cargo run --example test_618           # Single-test runner for test 618
+cargo run --example test_618_detailed  # Detailed output for test 618
 # Pattern: Each example filters tests.json by .section or .example field
 # Create new examples by copying the pattern from existing ones
 ```
@@ -116,7 +118,7 @@ jq '[.[] | select(.section == "Lists")] | length' tests/data/tests.json # Sectio
 **Parser method naming** (find with `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`):
 - `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()` line 569, `is_fenced_code_start()` line 375)
 - `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 631, `parse_list()` line 1268)
-- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2855, `try_parse_code_span()` line 2621)
+- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2805, `try_parse_code_span()` line 2642)
 
 **Lookahead pattern** for indented code + setext headings (prevents premature paragraph commits):
 ```rust
@@ -134,12 +136,16 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 256 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (654/655 - 99.8%)
+## Current Test Coverage (655/655 - 100%)
 
-**Remaining failure** (1 test):
-- **Lists** (1 test): Complex blockquote continuation in nested list structures (test 294) - lazy continuation of blockquote inside list item
+**Status**: ✅ **100% CommonMark v0.31.2 spec compliance achieved!**
 
-**Recent progress** (Oct 2025): Improved from 99.2% to 99.8% (650→654 passing). Fixed CDATA sections, HTML comments with special patterns (<!-->, <!--->), multi-line comment support, improved autolink detection, and complex multi-line HTML inline tags with boolean attributes and embedded tags in attribute values.
+All 655 test cases passing. The parser correctly handles all CommonMark features including complex edge cases like lazy continuation in nested blockquotes within list items.
+
+**Recent progress** (Oct 2025): Achieved 100% spec compliance by fixing lazy continuation logic in blockquotes. The fix ensures that:
+1. List items within blockquotes can have lazy continuation lines
+2. But list markers themselves cannot lazy-continue (preventing unintended list item additions)
+3. This allows complex nesting like blockquotes→lists→blockquotes with proper lazy paragraph continuation
 
 ## Debugging Workflow
 
