@@ -14,24 +14,24 @@ cargo run --example test_emphasis  # Run 132 emphasis tests (100% passing!)
 
 ## Project Philosophy
 
-**Non-blocking tests**: All tests pass in CI regardless of spec coverage. The test harness (`tests/spec_tests.rs`) reports statistics to stderr but never fails—this enables incremental development while tracking progress toward 100% compliance. See line 63 for the pattern.
+**Non-blocking tests**: All tests pass in CI regardless of spec coverage. The test harness (`tests/spec_tests.rs`) reports statistics to stderr but never fails—this enables incremental development while tracking progress toward 100% compliance. See line 62 for the pattern.
 
 ## Architecture Overview
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
-- `ast.rs` (~55 lines): Single `Node` enum with 18 variants (all `serde` serializable)
-- `parser.rs` (~4,100 lines): Two-phase architecture with 44+ methods
-- `renderer.rs` (~200 lines): Pattern-matching HTML renderer
-- `lib.rs` (~60 lines): Public API `markdown_to_html(&str) -> String`
-- `main.rs` (~10 lines): CLI stdin→HTML converter
+- `ast.rs` (~52 lines): Single `Node` enum with 18 variants (all `serde` serializable)
+- `parser.rs` (~4,250 lines): Two-phase architecture with 44+ methods
+- `renderer.rs` (~241 lines): Pattern-matching HTML renderer
+- `lib.rs` (~64 lines): Public API `markdown_to_html(&str) -> String`
+- `main.rs` (~11 lines): CLI stdin→HTML converter
 
-**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 30-146) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 147-235) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
+**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-237) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
-**Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2102-2489). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking.
+**Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2102-2498). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking.
 
 ## Critical Block Parsing Order
 
-**`src/parser.rs` lines 147-235** defines block precedence. **Reordering breaks tests.** The `parse()` method checks in this EXACT sequence:
+**`src/parser.rs` lines 154-237** defines block precedence. **Reordering breaks tests.** The `parse()` method checks in this EXACT sequence:
 
 1. Link reference definitions (skip, already collected)
 2. ATX headings (`##`, before `###` thematic breaks)
@@ -98,7 +98,7 @@ jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn  # Count b
 **Parser method naming** (find with `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`):
 - `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()` line 560, `is_fenced_code_start()` line 366)
 - `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 622, `parse_list()` line 1295)
-- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2775, `try_parse_code_span()` line 2612)
+- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2784, `try_parse_code_span()` line 2621)
 
 **Lookahead pattern** for indented code + setext headings (prevents premature paragraph commits):
 ```rust
@@ -112,7 +112,7 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 **Renderer output conventions** (all block elements end with `\n`):
 - Void tags: `<hr />\n`, `<br />\n`
 - Block tags: `<p>...</p>\n`, `<blockquote>\n...\n</blockquote>\n`
-- Conditional attributes: `<ol start="5">` only if start ≠ 1 (line 57), `<code class="language-rust">` only if info string present (line 36)
+- Conditional attributes: `<ol start="5">` only if start ≠ 1 (line 62), `<code class="language-rust">` only if info string present (line 38)
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
@@ -123,7 +123,7 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 - Code spans: Edge cases with backtick sequences (e.g., `\`\`\`foo\`\``)
 - Links: URI encoding edge cases
 
-**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 63: test always passes, outputs statistics to stderr. Failed examples: [294, 302, 318, 349, 505, 509, 512, 520, 521, 522]...
+**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Failed examples: [294, 302, 318, 349, 505, 509, 512, 520, 521, 522]...
 
 **Recent fixes** (as of 2024): Fixed nested emphasis/strong delimiter processing by implementing proper CommonMark modulo-3 rule - all 132 emphasis tests now pass (100% coverage in that section).
 
@@ -138,13 +138,13 @@ When tests fail after changes:
 
 ## Common Pitfalls
 
-1. **Block order violations**: Adding block type in wrong position in `parse()` method (lines 147-235) breaks existing tests. The order is load-bearing.
+1. **Block order violations**: Adding block type in wrong position in `parse()` method (lines 154-237) breaks existing tests. The order is load-bearing.
 2. **Tab expansion**: Tabs are NOT 4 spaces - use `count_indent_columns()` which advances to next multiple of 4 (e.g., tab at column 2 → column 4, at column 5 → column 8)
 3. **Link refs**: Case-insensitive (`[FOO]` matches `[foo]`), whitespace-collapsed, stored in phase 1. Normalize with `.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")` pattern.
-4. **Setext headings**: Must lookahead (line 222) before committing to paragraph parse, otherwise underline becomes separate paragraph
+4. **Setext headings**: Must lookahead (line 212) before committing to paragraph parse, otherwise underline becomes separate paragraph
 5. **HTML blocks**: 7 distinct start conditions (line 805) with different end conditions. Type 1 (`<script>`) ends with `</script>`, Type 6 (normal tags) ends with blank line.
 6. **List compatibility**: Compatible markers (same type/delimiter) continue list, incompatible start new list. See `ListType::is_compatible()` line 1976.
-7. **Delimiter flanking**: `*` and `_` have asymmetric rules. `_` requires punctuation before/after for certain positions (lines 2203-2229). Don't simplify this logic.
+7. **Delimiter flanking**: `*` and `_` have asymmetric rules. `_` requires punctuation before/after for certain positions (lines 2723-2783). Don't simplify this logic.
 
 ## Key Resources
 
