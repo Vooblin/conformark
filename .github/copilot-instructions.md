@@ -1,11 +1,11 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 97.4% spec compliance (638/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 98.0% spec compliance (642/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (97.4%)
+cargo test -- --nocapture                  # See test results + coverage (98.0%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
 cargo run --example check_failures        # Analyze specific failing tests
@@ -25,7 +25,7 @@ cargo run --example check_failures        # Analyze specific failing tests
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
 - `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable for tooling/debugging—use `serde_json::to_string_pretty()` to inspect AST structure)
-- `parser.rs` (4,382 lines): Two-phase architecture with 45 methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
+- `parser.rs` (4,404 lines): Two-phase architecture with 45+ methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
 - `renderer.rs` (241 lines): Pattern-matching HTML renderer
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter (`echo "text" | cargo run`)
@@ -38,7 +38,7 @@ cargo run --example check_failures        # Analyze specific failing tests
 
 **Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-236) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
-**Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2102-2498). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking. The `DelimiterRun` struct (lines 6-13) tracks position, count, flanking rules, and active status for each delimiter.
+**Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2139-2850). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking. The `DelimiterRun` struct (lines 7-15) tracks position, count, flanking rules, and active status for each delimiter.
 
 ## Critical Block Parsing Order
 
@@ -113,9 +113,9 @@ jq '[.[] | select(.section == "Lists")] | length' tests/data/tests.json # Sectio
 ## Implementation Patterns
 
 **Parser method naming** (find with `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`):
-- `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()` line 560, `is_fenced_code_start()` line 366)
-- `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 622, `parse_list()` line 1295)
-- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2784, `try_parse_code_span()` line 2621)
+- `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()` line 561, `is_fenced_code_start()` line 367)
+- `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 623, `parse_list()` line 1320)
+- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2855, `try_parse_code_span()` line 2621)
 
 **Lookahead pattern** for indented code + setext headings (prevents premature paragraph commits):
 ```rust
@@ -131,17 +131,18 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 - Block tags: `<p>...</p>\n`, `<blockquote>\n...\n</blockquote>\n`
 - Conditional attributes: `<ol start="5">` only if start ≠ 1 (line 62), `<code class="language-rust">` only if info string present (line 38)
 
-**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
+**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 248 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (638/655 - 97.4%)
+## Current Test Coverage (642/655 - 98.0%)
 
-**Remaining failures** (17 tests across 2 categories):
-- **Links**: Reference link edge cases, whitespace handling in labels
-- **Lists**: Complex blockquote continuation in nested structures
+**Remaining failures** (13 tests across 3 categories):
+- **Lists**: Complex blockquote continuation in nested structures (1 test)
+- **Links/Images**: Whitespace handling edge cases (3 tests)
+- **Raw HTML**: Invalid HTML tag validation (6 tests, need to reject malformed tags)
 
 **Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Use `cargo run --example check_failures` to see current failures.
 
-**Recent progress** (Oct 2025): Improved from 96.8% to 97.4% (634→638 passing). Fixed HTML tag and autolink precedence in link parsing—when scanning for closing `]` in link text, unmatched `<` characters now properly prevent link parsing per spec (tests 526, 528, 538, 540).
+**Recent progress** (Oct 2025): Improved from 97.4% to 98.0% (638→642 passing). Fixed reference link parsing: added label validation (no unescaped brackets, no whitespace-only labels), fixed consecutive reference definitions bug in first pass (tests 548, 554, 567, 572).
 
 ## Debugging Workflow
 
