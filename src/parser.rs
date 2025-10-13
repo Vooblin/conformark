@@ -982,80 +982,20 @@ impl Parser {
             }
         }
 
-        // Find the end of the first tag (either > or />)
-        let mut in_quotes = false;
-        let mut quote_char = ' ';
-        let mut tag_end = 0;
-
-        for (i, ch) in trimmed.chars().enumerate() {
-            if i == 0 {
-                continue; // Skip the opening <
+        // Use the inline HTML parser to validate the tag structure
+        let chars: Vec<char> = trimmed.chars().collect();
+        if let Some((_, end_pos)) = self.try_parse_html_inline(&chars, 0) {
+            // The tag was successfully parsed
+            // Now check that there's only whitespace after it
+            if end_pos == chars.len() {
+                return true; // Tag ends at end of line
             }
-
-            if in_quotes {
-                if ch == quote_char {
-                    in_quotes = false;
-                }
-            } else if ch == '"' || ch == '\'' {
-                in_quotes = true;
-                quote_char = ch;
-            } else if ch == '>' {
-                tag_end = i;
-                break;
-            }
+            // Check if rest is whitespace
+            let rest: String = chars[end_pos..].iter().collect();
+            return rest.trim().is_empty();
         }
 
-        if tag_end == 0 {
-            return false; // No closing >
-        }
-
-        // Check what comes after the tag - should be ONLY whitespace
-        let after_tag = &trimmed[tag_end + 1..];
-        if !after_tag.trim().is_empty() {
-            return false; // Content after tag means this is inline HTML, not a block
-        }
-
-        // Validate the tag itself
-        let tag_content = &trimmed[1..tag_end];
-
-        // For closing tags, skip the /
-        let tag_part = tag_content.strip_prefix('/').unwrap_or(tag_content);
-
-        // Extract just the tag name (before space or other attributes)
-        // Tag names can only contain ASCII letters, digits, and hyphens
-        let tag_name_end = tag_part
-            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
-            .unwrap_or(tag_part.len());
-
-        if tag_name_end == 0 {
-            return false; // Empty tag name
-        }
-
-        let tag_name = &tag_part[..tag_name_end];
-
-        // Tag name must start with ASCII letter
-        if let Some(first_char) = tag_name.chars().next() {
-            if !first_char.is_ascii_alphabetic() {
-                return false;
-            }
-        } else {
-            return false;
-        }
-
-        // After tag name, we should only have whitespace, '/', or '>'
-        // Anything else (like '.' in '<foo.bar>') makes it invalid
-        if tag_name_end < tag_part.len() {
-            let after_tag_name = &tag_part[tag_name_end..];
-            // First character after tag name must be whitespace, '/', or nothing (end of tag_part)
-            if let Some(ch) = after_tag_name.chars().next()
-                && !ch.is_whitespace()
-                && ch != '/'
-            {
-                return false; // Invalid character after tag name
-            }
-        }
-
-        true
+        false
     }
 
     /// Parse an HTML block of the given type
@@ -4141,15 +4081,15 @@ impl Parser {
         if i + 2 < chars.len() && chars[i] == '!' && chars[i + 1] == '-' && chars[i + 2] == '-' {
             i += 3;
             // Look for closing -->
-            // Cannot contain -->, cannot start with > or ->, cannot end with -
+            // Cannot start with > or ->, cannot end with -, cannot contain --
             let comment_start = i;
 
-            // Check for invalid starts
+            // Check for invalid starts: <!--> or <!--->
             if i < chars.len() && chars[i] == '>' {
                 return None; // <!--> is invalid
             }
             if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
-                return None; // <!--> is invalid
+                return None; // <!---> is invalid
             }
 
             while i < chars.len() {
@@ -4158,14 +4098,21 @@ impl Parser {
                     && chars[i + 1] == '-'
                     && chars[i + 2] == '>'
                 {
-                    // Found closing -->
-                    // Check that it doesn't end with - before --
+                    // Found potential closing -->
+                    // Check that comment doesn't end with - before the --
                     if i > comment_start && chars[i - 1] == '-' {
                         return None; // Cannot end with ---
                     }
                     i += 3;
                     let html: String = chars[start..i].iter().collect();
                     return Some((Node::HtmlInline(html), i));
+                }
+                // Check for -- which is not allowed inside comment text (except at the end)
+                if chars[i] == '-' && i + 1 < chars.len() && chars[i + 1] == '-' {
+                    // This is a -- but not followed by >
+                    if i + 2 >= chars.len() || chars[i + 2] != '>' {
+                        return None; // -- is not allowed in comment text
+                    }
                 }
                 // Cannot have newline in inline HTML
                 if chars[i] == '\n' {
@@ -4258,12 +4205,13 @@ impl Parser {
             while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t') {
                 i += 1;
             }
-            // Must end with >
+            // Must end with > (closing tags cannot have attributes)
             if i < chars.len() && chars[i] == '>' {
                 i += 1;
                 let html: String = chars[start..i].iter().collect();
                 return Some((Node::HtmlInline(html), i));
             }
+            // If we see anything other than whitespace or >, it's invalid (e.g., attributes on closing tag)
             return None;
         }
 
@@ -4294,10 +4242,14 @@ impl Parser {
             i += 1;
         }
 
+        // Track if we're right after the tag name (special case for first attribute)
+        let mut after_tag_name = true;
+
         // Now parse attributes
         loop {
             // Skip whitespace (spaces, tabs, and up to one newline)
             let mut newline_seen = false;
+            let whitespace_start = i;
             while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t' || chars[i] == '\n') {
                 if chars[i] == '\n' {
                     if newline_seen {
@@ -4307,6 +4259,7 @@ impl Parser {
                 }
                 i += 1;
             }
+            let had_whitespace = i > whitespace_start;
 
             // Check for end of tag
             if i >= chars.len() {
@@ -4324,6 +4277,13 @@ impl Parser {
                 let html: String = chars[start..i].iter().collect();
                 return Some((Node::HtmlInline(html), i));
             }
+
+            // For attributes after the tag name, we must have whitespace before the attribute
+            // Exception: right after tag name is OK without whitespace if tag name ended
+            if !after_tag_name && !had_whitespace {
+                return None; // Must have whitespace between attributes
+            }
+            after_tag_name = false;
 
             // Try to parse attribute name
             if !(chars[i].is_ascii_alphabetic() || chars[i] == '_' || chars[i] == ':') {
@@ -4376,12 +4336,9 @@ impl Parser {
 
                 // Parse attribute value
                 if chars[i] == '"' {
-                    // Double-quoted value
+                    // Double-quoted value - can contain newlines
                     i += 1;
                     while i < chars.len() && chars[i] != '"' {
-                        if chars[i] == '\n' {
-                            return None; // No newlines in quoted values
-                        }
                         i += 1;
                     }
                     if i >= chars.len() {
@@ -4389,12 +4346,9 @@ impl Parser {
                     }
                     i += 1; // Skip closing "
                 } else if chars[i] == '\'' {
-                    // Single-quoted value
+                    // Single-quoted value - can contain newlines
                     i += 1;
                     while i < chars.len() && chars[i] != '\'' {
-                        if chars[i] == '\n' {
-                            return None; // No newlines in quoted values
-                        }
                         i += 1;
                     }
                     if i >= chars.len() {
