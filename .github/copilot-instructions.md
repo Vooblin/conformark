@@ -1,14 +1,14 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 98.0% spec compliance (642/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 98.6% spec compliance (646/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (98.0%)
+cargo test -- --nocapture                  # See test results + coverage (98.6%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
-cargo run --example check_failures        # Analyze specific failing tests
+cargo run --example check_failures        # Analyze 9 currently failing tests
 ```
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
@@ -114,8 +114,8 @@ jq '[.[] | select(.section == "Lists")] | length' tests/data/tests.json # Sectio
 ## Implementation Patterns
 
 **Parser method naming** (find with `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`):
-- `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()` line 561, `is_fenced_code_start()` line 367)
-- `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 623, `parse_list()` line 1320)
+- `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()` line 569, `is_fenced_code_start()` line 375)
+- `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 631, `parse_list()` line 1328)
 - `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2855, `try_parse_code_span()` line 2621)
 
 **Lookahead pattern** for indented code + setext headings (prevents premature paragraph commits):
@@ -132,21 +132,17 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 - Block tags: `<p>...</p>\n`, `<blockquote>\n...\n</blockquote>\n`
 - Conditional attributes: `<ol start="5">` only if start ≠ 1 (line 62), `<code class="language-rust">` only if info string present (line 38)
 
-**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 248 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
+**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 256 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (642/655 - 98.0%)
+## Current Test Coverage (646/655 - 98.6%)
 
-**Remaining failures** (13 tests across 3 categories):
+**Remaining failures** (9 tests across 3 categories):
 - **Lists** (1 test): Complex blockquote continuation in nested list structures (test 294)
 - **Links/Images** (3 tests): Whitespace handling at line boundaries (tests 558, 570, 589)
-- **Raw HTML** (6 tests): Invalid HTML tag validation—need to reject malformed tags like `<a h*#ref="hi">` (tests 621, 624, 626, 627, 628, 631)
-  - Complex issue: Involves interaction between HTML block type 7 detection (`is_complete_tag_line()`) and inline HTML parsing (`try_parse_html_inline()`)
-  - Type 7 blocks require complete tags on single lines, while inline HTML in paragraphs can span soft line breaks
-  - Fixing requires careful coordination between block and inline parsers
+- **Raw HTML** (4 tests): Complex edge cases involving multi-line tags and comments (tests 618, 627, 628, 631)
+- **Soft line breaks** (1 test): Trailing space handling (test 652)
 
-**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Use `cargo run --example check_failures` to see current failures.
-
-**Recent progress** (Oct 2025): Improved from 97.4% to 98.0% (638→642 passing). Fixed reference link parsing: added label validation (no unescaped brackets, no whitespace-only labels), fixed consecutive reference definitions bug in first pass (tests 548, 554, 567, 572).
+**Recent progress** (Oct 2025): Improved from 98.0% to 98.6% (642→646 passing). Fixed HTML tag validation: reject closing tags with attributes (`</a href="foo">`), require whitespace between attributes (`href='bar'title=title` is invalid), allow newlines in quoted attribute values for multi-line tags.
 
 ## Debugging Workflow
 
@@ -163,8 +159,8 @@ When tests fail after changes:
 2. **Tab expansion**: Tabs are NOT 4 spaces - use `count_indent_columns()` which advances to next multiple of 4 (e.g., tab at column 2 → column 4, at column 5 → column 8)
 3. **Link refs**: Case-insensitive using Unicode case folding (`[FOO]` matches `[foo]`, `[ẞ]` matches `[SS]`), whitespace-collapsed, stored in phase 1. Normalize with `unicode_casefold::UnicodeCaseFold` trait's `case_fold()` method plus `.split_whitespace().collect::<Vec<_>>().join(" ")` pattern.
 4. **Setext headings**: Must lookahead (line 212) before committing to paragraph parse, otherwise underline becomes separate paragraph
-5. **HTML blocks**: 7 distinct start conditions (line 805) with different end conditions. Type 1 (`<script>`) ends with `</script>`, Type 6 (normal tags) ends with blank line.
-6. **List compatibility**: Compatible markers (same type/delimiter) continue list, incompatible start new list. See `ListType::is_compatible()` line 1976.
+5. **HTML blocks**: 7 distinct start conditions (line 814) with different end conditions. Type 1 (`<script>`) ends with `</script>`, Type 6 (normal tags) ends with blank line.
+6. **List compatibility**: Compatible markers (same type/delimiter) continue list, incompatible start new list. See `ListType::is_compatible()` line 2005.
 7. **Delimiter flanking**: `*` and `_` have asymmetric rules. `_` requires punctuation before/after for certain positions (lines 2723-2783). Don't simplify this logic.
 
 ## Key Resources
