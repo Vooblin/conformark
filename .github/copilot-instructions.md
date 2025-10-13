@@ -1,11 +1,11 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 96.5% spec compliance (632/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 96.6% spec compliance (633/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (96.5%)
+cargo test -- --nocapture                  # See test results + coverage (96.6%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
 cargo run --example check_failures        # Analyze specific failing tests
@@ -23,18 +23,18 @@ cargo run --example check_failures        # Analyze specific failing tests
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
 - `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable)
-- `parser.rs` (4,296 lines): Two-phase architecture with 44+ methods
+- `parser.rs` (4,382 lines): Two-phase architecture with 45+ methods
 - `renderer.rs` (241 lines): Pattern-matching HTML renderer
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter
 
-**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-240) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
+**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-236) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
 **Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2102-2498). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking.
 
 ## Critical Block Parsing Order
 
-**`src/parser.rs` lines 154-240** defines block precedence. **Reordering breaks tests.** The `parse()` method checks in this EXACT sequence:
+**`src/parser.rs` lines 154-236** defines block precedence. **Reordering breaks tests.** The `parse()` method checks in this EXACT sequence:
 
 1. Link reference definitions (skip, already collected)
 2. ATX headings (`##`, before `###` thematic breaks)
@@ -121,16 +121,16 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (632/655 - 96.5%)
+## Current Test Coverage (633/655 - 96.6%)
 
-**Remaining failures** (23 tests across 3 categories):
-- **Links**: Multi-line destinations, HTML tag interference in link text, Unicode case folding
-- **Lists**: Complex blockquote interactions, setext heading rendering edge cases
+**Remaining failures** (22 tests across 3 categories):
+- **Links**: Multi-line destinations, HTML tag interference in link text, Unicode case folding, reference link edge cases
+- **Lists**: Complex blockquote continuation in nested structures
 - **Code spans**: Backtick edge cases with unusual spacing
 
 **Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Use `cargo run --example check_failures` to see current failures.
 
-**Recent progress** (Oct 2025): Improved from 96.3% to 96.5% (631→632 passing). Fixed tight/loose list detection to properly handle items containing multiple block-level elements with blank lines between them (CommonMark spec §5.3).
+**Recent progress** (Oct 2025): Improved from 96.5% to 96.6% (632→633 passing). Fixed tight list rendering to properly handle unwrapped paragraph content after block-level elements (headings, code blocks) by removing extra newline in renderer.
 
 ## Debugging Workflow
 
@@ -143,7 +143,7 @@ When tests fail after changes:
 
 ## Common Pitfalls
 
-1. **Block order violations**: Adding block type in wrong position in `parse()` method (lines 154-240) breaks existing tests. The order is load-bearing.
+1. **Block order violations**: Adding block type in wrong position in `parse()` method (lines 154-236) breaks existing tests. The order is load-bearing.
 2. **Tab expansion**: Tabs are NOT 4 spaces - use `count_indent_columns()` which advances to next multiple of 4 (e.g., tab at column 2 → column 4, at column 5 → column 8)
 3. **Link refs**: Case-insensitive (`[FOO]` matches `[foo]`), whitespace-collapsed, stored in phase 1. Normalize with `.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")` pattern.
 4. **Setext headings**: Must lookahead (line 212) before committing to paragraph parse, otherwise underline becomes separate paragraph

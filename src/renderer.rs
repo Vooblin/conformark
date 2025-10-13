@@ -125,8 +125,8 @@ fn render_node(node: &Node) -> String {
                                 inline_content.push_str(&para_content);
                             } else {
                                 // Subsequent paragraphs in tight items also unwrapped but as block-level
+                                // Don't add extra newline - content already has it or gets trimmed later
                                 block_content.push_str(&para_content);
-                                block_content.push('\n');
                             }
                         }
                         _ => {
