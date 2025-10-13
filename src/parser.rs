@@ -2901,8 +2901,13 @@ impl Parser {
 
         // Check what follows: '(' for inline, '[' for reference
         if i < chars.len() && chars[i] == '(' {
-            // Inline link
-            self.try_parse_inline_link(chars, i, &link_text)
+            // Try inline link first
+            if let Some(result) = self.try_parse_inline_link(chars, i, &link_text) {
+                Some(result)
+            } else {
+                // Inline link failed, fall back to shortcut reference link
+                self.try_parse_shortcut_reference_link(&link_text, i)
+            }
         } else if i < chars.len() && chars[i] == '[' {
             // Full or collapsed reference link
             self.try_parse_reference_link(chars, i, &link_text)
