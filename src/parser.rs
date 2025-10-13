@@ -2095,7 +2095,13 @@ impl Parser {
     /// Uses a delimiter-based approach for emphasis per CommonMark spec
     fn parse_inline(&self, text: &str) -> Vec<Node> {
         let chars: Vec<char> = text.chars().collect();
-        self.parse_inline_with_delimiter_stack(&chars, 0, chars.len())
+        self.parse_inline_with_delimiter_stack(&chars, 0, chars.len(), false)
+    }
+
+    /// Parse inline elements inside a link (links cannot contain other links)
+    fn parse_inline_in_link(&self, text: &str) -> Vec<Node> {
+        let chars: Vec<char> = text.chars().collect();
+        self.parse_inline_with_delimiter_stack(&chars, 0, chars.len(), true)
     }
 
     /// Parse inline elements with proper delimiter stack algorithm per CommonMark spec
@@ -2104,6 +2110,7 @@ impl Parser {
         chars: &[char],
         start: usize,
         end: usize,
+        inside_link: bool,
     ) -> Vec<Node> {
         let mut nodes = Vec::new();
         let mut delimiter_stack: Vec<DelimiterRun> = Vec::new();
@@ -2181,7 +2188,9 @@ impl Parser {
             }
 
             // Try to parse link (links take precedence over emphasis per Rule 17)
-            if chars[i] == '['
+            // Links cannot contain other links per CommonMark spec
+            if !inside_link
+                && chars[i] == '['
                 && let Some((link_node, new_i)) = self.try_parse_link(chars, i)
             {
                 nodes.push(link_node);
@@ -2848,8 +2857,15 @@ impl Parser {
         let text_end = i;
         i += 1; // Move past ']'
 
-        // Parse the link text
+        // Parse the link text to check if it contains links
+        // Per CommonMark spec: links cannot contain other links
         let link_text: String = chars[text_start..text_end].iter().collect();
+        let parsed_text = self.parse_inline(&link_text);
+
+        // Check if the parsed text contains any links
+        if Self::contains_link(&parsed_text) {
+            return None; // Links cannot contain other links
+        }
 
         // Check what follows: '(' for inline, '[' for reference
         if i < chars.len() && chars[i] == '(' {
@@ -2862,6 +2878,27 @@ impl Parser {
             // Try shortcut reference link
             self.try_parse_shortcut_reference_link(&link_text, i)
         }
+    }
+
+    /// Check if a list of nodes contains any Link nodes (recursively)
+    fn contains_link(nodes: &[Node]) -> bool {
+        for node in nodes {
+            match node {
+                Node::Link { .. } => return true,
+                Node::Emphasis(children) | Node::Strong(children) => {
+                    if Self::contains_link(children) {
+                        return true;
+                    }
+                }
+                Node::Image { alt_text, .. } => {
+                    if Self::contains_link(alt_text) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     fn try_parse_inline_link(
@@ -2977,7 +3014,7 @@ impl Parser {
         }
         i += 1; // Move past ')'
 
-        let children = self.parse_inline(link_text);
+        let children = self.parse_inline_in_link(link_text);
 
         Some((
             Node::Link {
@@ -3026,7 +3063,7 @@ impl Parser {
 
         // Look up the reference definition
         if let Some((destination, title)) = self.reference_definitions.get(&label) {
-            let children = self.parse_inline(link_text);
+            let children = self.parse_inline_in_link(link_text);
             Some((
                 Node::Link {
                     destination: destination.clone(),
@@ -3051,7 +3088,7 @@ impl Parser {
 
         // Look up the reference definition
         if let Some((destination, title)) = self.reference_definitions.get(&label) {
-            let children = self.parse_inline(link_text);
+            let children = self.parse_inline_in_link(link_text);
             Some((
                 Node::Link {
                     destination: destination.clone(),
