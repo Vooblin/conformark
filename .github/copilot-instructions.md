@@ -1,11 +1,11 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 96.8% spec compliance (634/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 97.4% spec compliance (638/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (96.8%)
+cargo test -- --nocapture                  # See test results + coverage (97.4%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
 cargo run --example check_failures        # Analyze specific failing tests
@@ -15,6 +15,8 @@ cargo run --example check_failures        # Analyze specific failing tests
 
 **Finding methods?** Use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all parser methods with line numbers.
 
+**Debugging AST?** Use `serde_json::to_string_pretty(&ast_node)` to inspect parsed structure—all `Node` variants derive `Serialize`.
+
 ## Project Philosophy
 
 **Non-blocking tests**: All tests pass in CI regardless of spec coverage. The test harness (`tests/spec_tests.rs`) reports statistics to stderr but never fails—this enables incremental development while tracking progress toward 100% compliance. See line 62 for the pattern.
@@ -22,11 +24,17 @@ cargo run --example check_failures        # Analyze specific failing tests
 ## Architecture Overview
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
-- `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable for tooling/debugging)
+- `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable for tooling/debugging—use `serde_json::to_string_pretty()` to inspect AST structure)
 - `parser.rs` (4,382 lines): Two-phase architecture with 45 methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
 - `renderer.rs` (241 lines): Pattern-matching HTML renderer
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter (`echo "text" | cargo run`)
+
+**Dependencies** (minimal by design):
+- `serde` (v1.0, derive feature): AST serialization/deserialization
+- `serde_json` (v1.0): Test data loading and optional AST inspection
+- `unicode-casefold` (v0.2.0): Unicode case folding for link reference normalization (`[ẞ]` matches `[SS]`)
+- `test-fuzz` (dev): Fuzz testing infrastructure
 
 **Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-236) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
@@ -79,8 +87,12 @@ cargo run --example check_failures        # Analyze specific failing tests
 cargo run --example test_emphasis      # 132 emphasis tests (100% passing)
 cargo run --example test_list_items    # 48 list item tests
 cargo run --example test_blockquotes   # 25 blockquote tests
+cargo run --example test_hard_breaks   # Test hard line breaks
+cargo run --example test_html_blocks   # Test HTML block parsing
+cargo run --example test_link_refs     # Test link reference definitions
 cargo run --example check_failures     # Analyze currently failing tests
 # Pattern: Each example filters tests.json by .section field
+# Create new examples by copying the pattern from existing ones
 ```
 
 **Query test data** (requires `jq`):
@@ -121,16 +133,15 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (634/655 - 96.8%)
+## Current Test Coverage (638/655 - 97.4%)
 
-**Remaining failures** (21 tests across 3 categories):
-- **Links**: Multi-line destinations, HTML tag interference in link text, reference link edge cases
+**Remaining failures** (17 tests across 2 categories):
+- **Links**: Reference link edge cases, whitespace handling in labels
 - **Lists**: Complex blockquote continuation in nested structures
-- **Code spans**: Backtick edge cases with unusual spacing
 
 **Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Use `cargo run --example check_failures` to see current failures.
 
-**Recent progress** (Oct 2025): Improved from 96.6% to 96.8% (633→634 passing). Implemented Unicode case folding for link references using the `unicode-casefold` crate, enabling proper matching of references like `[ẞ]` with `[SS]: /url` (German eszett case folding).
+**Recent progress** (Oct 2025): Improved from 96.8% to 97.4% (634→638 passing). Fixed HTML tag and autolink precedence in link parsing—when scanning for closing `]` in link text, unmatched `<` characters now properly prevent link parsing per spec (tests 526, 528, 538, 540).
 
 ## Debugging Workflow
 
