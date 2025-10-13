@@ -2150,12 +2150,22 @@ impl Parser {
             }
 
             // Try to parse code span first (takes precedence over emphasis per Rule 17)
-            if chars[i] == '`'
-                && let Some((code_node, new_i)) = self.try_parse_code_span(chars, i)
-            {
-                nodes.push(code_node);
-                i = new_i;
-                continue;
+            if chars[i] == '`' {
+                if let Some((code_node, new_i)) = self.try_parse_code_span(chars, i) {
+                    nodes.push(code_node);
+                    i = new_i;
+                    continue;
+                } else {
+                    // Code span parsing failed - consume the entire backtick run as literal text
+                    // This prevents sub-runs from being matched (e.g., ```foo`` shouldn't match ``foo``)
+                    let start = i;
+                    while i < end && chars[i] == '`' {
+                        i += 1;
+                    }
+                    let backticks: String = chars[start..i].iter().collect();
+                    nodes.push(Node::Text(backticks));
+                    continue;
+                }
             }
 
             // Try to parse autolink (before regular links)

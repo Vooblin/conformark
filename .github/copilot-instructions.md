@@ -1,11 +1,11 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 93.3% spec compliance (611/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 94.2% spec compliance (617/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture     # See test results + coverage (93.3%)
+cargo test -- --nocapture     # See test results + coverage (94.2%)
 echo "**bold**" | cargo run   # Test CLI parser
 cargo run --example test_emphasis  # Run 132 emphasis tests (100% passing!)
 ```
@@ -25,7 +25,7 @@ cargo run --example test_emphasis  # Run 132 emphasis tests (100% passing!)
 - `lib.rs` (~64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (~11 lines): CLI stdin→HTML converter
 
-**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-237) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
+**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-237) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
 **Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2102-2498). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking.
 
@@ -114,16 +114,16 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 - Block tags: `<p>...</p>\n`, `<blockquote>\n...\n</blockquote>\n`
 - Conditional attributes: `<ol start="5">` only if start ≠ 1 (line 62), `<code class="language-rust">` only if info string present (line 38)
 
-**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
+**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (611/655 - 93.3%)
+## Current Test Coverage (617/655 - 94.2%)
 
-**Remaining failures** (44 tests):
+**Remaining failures** (38 tests):
 - List items: Complex blockquote interactions, block-level content formatting  
-- Code spans: Edge cases with backtick sequences (e.g., `\`\`\`foo\`\``)
-- Links: URI encoding edge cases
+- Code spans: Edge cases with backtick sequences
+- Links: URI encoding edge cases, multi-line destinations, HTML tag interference
 
-**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Failed examples: [294, 302, 318, 349, 505, 509, 512, 520, 521, 522]...
+**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Failed examples: [294, 302, 318, 505, 509, 512, 526, 528, 538, 540]...
 
 **Recent fixes** (as of 2024): Fixed nested emphasis/strong delimiter processing by implementing proper CommonMark modulo-3 rule - all 132 emphasis tests now pass (100% coverage in that section).
 
