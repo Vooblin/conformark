@@ -1,6 +1,7 @@
 /// CommonMark parser implementation
 use crate::ast::Node;
 use std::collections::HashMap;
+use unicode_casefold::UnicodeCaseFold;
 
 /// Delimiter run on the stack for emphasis processing
 #[derive(Debug, Clone)]
@@ -3890,10 +3891,10 @@ impl Parser {
 
     /// Normalize a label for matching (case-insensitive, collapse whitespace)
     fn normalize_label(label: &str) -> String {
-        label
-            .chars()
-            .map(|c| c.to_lowercase().to_string())
-            .collect::<String>()
+        // Use Unicode case folding instead of simple lowercase
+        // This handles special cases like German ẞ → ss
+        let casefolded: String = label.chars().flat_map(|c| c.case_fold()).collect();
+        casefolded
             .split_whitespace()
             .collect::<Vec<&str>>()
             .join(" ")
