@@ -17,6 +17,8 @@ cargo run --example check_failures        # Analyze any failing tests
 
 **Debugging AST?** Use `serde_json::to_string_pretty(&ast_node)` to inspect parsed structure—all `Node` variants derive `Serialize`.
 
+> **Note on line numbers**: This file references specific line numbers (e.g., "line 256", "lines 163-236"). If code changes, use the grep commands provided to relocate the relevant code sections.
+
 ## Project Philosophy
 
 **Non-blocking tests**: All tests pass in CI regardless of spec coverage. The test harness (`tests/spec_tests.rs`) reports statistics to stderr but never fails—this enables incremental development while tracking progress toward 100% compliance. See line 62 for the pattern. This design allows continuous integration while building toward full spec compliance.
@@ -94,8 +96,24 @@ cargo run --example check_failures     # Analyze any failing tests with diffs
 cargo run --example test_169           # Single-test runner (example pattern)
 cargo run --example test_618           # Single-test runner for test 618
 cargo run --example test_618_detailed  # Detailed output for test 618
-# Pattern: Each example filters tests.json by .section or .example field
-# Create new examples by copying the pattern from existing ones
+```
+
+**Example runner pattern** (copy to create new test runners):
+```rust
+// Filter tests by section name
+let emphasis_tests: Vec<_> = tests
+    .iter()
+    .filter(|t| t.section == "Emphasis and strong emphasis")
+    .collect();
+
+// Or by specific example numbers
+let failing_examples = [294, 570, 618];
+for &example in &failing_examples {
+    if let Some(test) = tests.iter().find(|t| t.example == example) {
+        let result = markdown_to_html(&test.markdown);
+        println!("Example {}: {}", example, result == test.html);
+    }
+}
 ```
 
 **Query test data** (requires `jq`):
@@ -146,6 +164,18 @@ All 655 test cases passing. The parser correctly handles all CommonMark features
 1. List items within blockquotes can have lazy continuation lines
 2. But list markers themselves cannot lazy-continue (preventing unintended list item additions)
 3. This allows complex nesting like blockquotes→lists→blockquotes with proper lazy paragraph continuation
+
+## Troubleshooting
+
+**"Cannot find function `is_xyz` or `parse_xyz`"**: Use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all parser methods with current line numbers. The codebase has 45+ methods following strict naming conventions.
+
+**Line numbers don't match**: Code has changed—use grep patterns from this file to locate the relevant sections. For example: `grep -n "FIRST PASS" src/parser.rs` or `grep -n "struct DelimiterRun" src/parser.rs`.
+
+**Tests passing but output seems wrong**: Remember tests are non-blocking (line 62 in `tests/spec_tests.rs`). Check stderr for actual pass/fail statistics: `cargo test -- --nocapture 2>&1 | grep -A5 "CommonMark Spec"`.
+
+**Clippy warnings after changes**: CI requires zero warnings (`-D warnings` flag). Common issues: unused variables in match arms, missing `#[allow(dead_code)]` on test structs, or non-idiomatic patterns. Run `cargo clippy --all-targets --all-features` locally.
+
+**Tab vs space issues**: Never treat tabs as 4 spaces—use `count_indent_columns()` (line 256) which advances to next multiple of 4. Example: tab at column 2 → column 4, at column 5 → column 8.
 
 ## Debugging Workflow
 

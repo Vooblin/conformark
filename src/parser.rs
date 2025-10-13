@@ -1,3 +1,4 @@
+use crate::ast::Alignment;
 /// CommonMark parser implementation
 use crate::ast::Node;
 use std::collections::HashMap;
@@ -216,6 +217,12 @@ impl Parser {
             // Blank lines are skipped
             else if line.trim().is_empty() {
                 i += 1;
+            }
+            // Try to parse GFM table (check before setext heading and paragraph)
+            else if self.is_table_start(&lines[i..]) {
+                let (table, lines_consumed) = self.parse_table(&lines[i..]);
+                blocks.push(table);
+                i += lines_consumed;
             }
             // Try to parse Setext heading (check if next line is underline)
             else if i + 1 < lines.len() {
@@ -4418,5 +4425,211 @@ impl Parser {
             }
             // Continue to next attribute or tag end
         }
+    }
+
+    // GFM Table parsing
+    fn is_table_start(&self, lines: &[&str]) -> bool {
+        // Tables need at least 2 lines: header row and delimiter row
+        if lines.len() < 2 {
+            return false;
+        }
+
+        // Check if second line is a valid delimiter row
+        self.is_table_delimiter_row(lines[1])
+    }
+
+    fn is_table_delimiter_row(&self, line: &str) -> bool {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        // Must contain at least one pipe to be a table delimiter
+        if !trimmed.contains('|') {
+            return false;
+        }
+
+        // Split by pipes
+        let parts: Vec<&str> = trimmed.split('|').collect();
+
+        // Must have at least one cell (could be ||col1|col2| or |col1|col2|)
+        // Filter out empty parts from leading/trailing pipes
+        let cells: Vec<&str> = parts
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if cells.is_empty() {
+            return false;
+        }
+
+        // Each cell must match the pattern: optional :, then dashes, optional :
+        for cell in cells {
+            if !self.is_valid_delimiter_cell(cell) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn is_valid_delimiter_cell(&self, cell: &str) -> bool {
+        let trimmed = cell.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        let bytes = trimmed.as_bytes();
+        let mut start = 0;
+        let mut end = bytes.len();
+
+        // Check for leading colon
+        if bytes[start] == b':' {
+            start += 1;
+        }
+
+        // Check for trailing colon
+        if end > start && bytes[end - 1] == b':' {
+            end -= 1;
+        }
+
+        // Everything between must be dashes, and there must be at least one
+        if start >= end {
+            return false;
+        }
+
+        for &byte in bytes.iter().take(end).skip(start) {
+            if byte != b'-' {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn parse_table(&self, lines: &[&str]) -> (Node, usize) {
+        if lines.len() < 2 {
+            // Shouldn't happen if is_table_start was called
+            return (Node::Paragraph(vec![Node::Text(lines[0].to_string())]), 1);
+        }
+
+        // Parse delimiter row to get alignments
+        let alignments = self.parse_table_alignments(lines[1]);
+
+        // Parse header row
+        let header_cells = self.parse_table_row(lines[0], &alignments, true);
+        let header_row = Node::TableRow(header_cells);
+
+        // Parse body rows
+        let mut body_rows = vec![header_row];
+        let mut i = 2; // Start after header and delimiter
+
+        while i < lines.len() {
+            let line = lines[i];
+
+            // Stop at blank line or non-table content
+            if line.trim().is_empty() {
+                break;
+            }
+
+            // Check if this looks like a table row (has pipes)
+            if !line.contains('|') {
+                break;
+            }
+
+            let cells = self.parse_table_row(line, &alignments, false);
+            body_rows.push(Node::TableRow(cells));
+            i += 1;
+        }
+
+        (
+            Node::Table {
+                alignments,
+                children: body_rows,
+            },
+            i,
+        )
+    }
+
+    fn parse_table_alignments(&self, delimiter_row: &str) -> Vec<Alignment> {
+        let trimmed = delimiter_row.trim();
+        let parts: Vec<&str> = trimmed.split('|').collect();
+
+        let cells: Vec<&str> = parts
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        cells
+            .iter()
+            .map(|cell| {
+                let trimmed = cell.trim();
+                let has_left = trimmed.starts_with(':');
+                let has_right = trimmed.ends_with(':');
+
+                match (has_left, has_right) {
+                    (true, true) => Alignment::Center,
+                    (true, false) => Alignment::Left,
+                    (false, true) => Alignment::Right,
+                    (false, false) => Alignment::None,
+                }
+            })
+            .collect()
+    }
+
+    fn parse_table_row(&self, row: &str, _alignments: &[Alignment], is_header: bool) -> Vec<Node> {
+        let trimmed = row.trim();
+
+        // Split by unescaped pipes
+        let mut cells = Vec::new();
+        let mut current_cell = String::new();
+        let chars: Vec<char> = trimmed.chars().collect();
+        let mut i = 0;
+        let mut in_backticks = false;
+
+        while i < chars.len() {
+            if chars[i] == '`' {
+                in_backticks = !in_backticks;
+                current_cell.push(chars[i]);
+                i += 1;
+            } else if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '|' {
+                // Escaped pipe
+                current_cell.push('|');
+                i += 2;
+            } else if chars[i] == '|' && !in_backticks {
+                // Cell separator
+                cells.push(current_cell.trim().to_string());
+                current_cell.clear();
+                i += 1;
+            } else {
+                current_cell.push(chars[i]);
+                i += 1;
+            }
+        }
+
+        // Don't forget the last cell
+        cells.push(current_cell.trim().to_string());
+
+        // Remove empty leading/trailing cells from pipes at start/end
+        while cells.first().is_some_and(|s| s.is_empty()) {
+            cells.remove(0);
+        }
+        while cells.last().is_some_and(|s| s.is_empty()) {
+            cells.pop();
+        }
+
+        // Parse cell content as inline markdown
+        cells
+            .into_iter()
+            .map(|cell_text| {
+                let children = self.parse_inline(&cell_text);
+                Node::TableCell {
+                    is_header,
+                    children,
+                }
+            })
+            .collect()
     }
 }

@@ -45,8 +45,25 @@ pub enum Node {
         title: Option<String>,
         alt_text: Vec<Node>, // Alt text can contain inline elements
     },
-    HardBreak,         // <br /> tag (backslash at end of line)
-    HtmlBlock(String), // Raw HTML block (passed through unchanged)
+    HardBreak,          // <br /> tag (backslash at end of line)
+    HtmlBlock(String),  // Raw HTML block (passed through unchanged)
     HtmlInline(String), // Raw HTML inline (passed through unchanged)
-                       // More node types will be added incrementally
+    // GFM extension nodes
+    Table {
+        alignments: Vec<Alignment>, // Column alignments
+        children: Vec<Node>,        // Contains TableRow nodes
+    },
+    TableRow(Vec<Node>), // Contains TableCell nodes
+    TableCell {
+        is_header: bool,
+        children: Vec<Node>, // Inline content
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Alignment {
+    None,
+    Left,
+    Right,
+    Center,
 }
