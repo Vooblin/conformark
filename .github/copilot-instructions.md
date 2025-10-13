@@ -1,54 +1,54 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 99.2% spec compliance (650/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with **99.7% spec compliance** (653/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture                  # See test results + coverage (99.2%)
+cargo test -- --nocapture                  # See test results + coverage (99.7%)
 echo "**bold**" | cargo run                # Test CLI parser
 cargo run --example test_emphasis         # Run 132 emphasis tests (100% passing!)
-cargo run --example check_failures        # Analyze 5 currently failing tests
+cargo run --example check_failures        # Analyze 2 currently failing tests
 ```
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
 
-**Finding methods?** Use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all parser methods with line numbers.
+**Finding methods?** Use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs` to see all 45+ parser methods with line numbers.
 
 **Debugging AST?** Use `serde_json::to_string_pretty(&ast_node)` to inspect parsed structure—all `Node` variants derive `Serialize`.
 
 ## Project Philosophy
 
-**Non-blocking tests**: All tests pass in CI regardless of spec coverage. The test harness (`tests/spec_tests.rs`) reports statistics to stderr but never fails—this enables incremental development while tracking progress toward 100% compliance. See line 62 for the pattern.
+**Non-blocking tests**: All tests pass in CI regardless of spec coverage. The test harness (`tests/spec_tests.rs`) reports statistics to stderr but never fails—this enables incremental development while tracking progress toward 100% compliance. See line 62 for the pattern. This design allows continuous integration while building toward full spec compliance.
 
 ## Architecture Overview
 
 **5-file core** (`src/{ast,parser,renderer,lib,main}.rs`):
 - `ast.rs` (52 lines): Single `Node` enum with 18 variants (all `serde` serializable for tooling/debugging—use `serde_json::to_string_pretty()` to inspect AST structure)
-- `parser.rs` (4,395 lines): Two-phase architecture with 45 methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
-- `renderer.rs` (241 lines): Pattern-matching HTML renderer
+- `parser.rs` (4,401 lines): Two-phase architecture with 45+ methods (use `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`)
+- `renderer.rs` (242 lines): Pattern-matching HTML renderer
 - `lib.rs` (64 lines): Public API `markdown_to_html(&str) -> String`
 - `main.rs` (11 lines): CLI stdin→HTML converter (`echo "text" | cargo run`)
 
 **Dependencies** (minimal by design):
-- `serde` (v1.0, derive feature): AST serialization/deserialization
-- `serde_json` (v1.0): Test data loading and optional AST inspection
-- `unicode-casefold` (v0.2.0): Unicode case folding for link reference normalization (`[ẞ]` matches `[SS]`)
-- `test-fuzz` (dev): Fuzz testing infrastructure
+- `serde` (v1.0, derive feature): AST serialization/deserialization for debugging
+- `serde_json` (v1.0): Test data loading from `tests/data/tests.json` + optional AST inspection
+- `unicode-casefold` (v0.2.0): Unicode case folding for link reference normalization (e.g., `[ẞ]` matches `[SS]`)
+- `test-fuzz` (dev): Fuzz testing infrastructure (not yet actively used)
 
-**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 31-153 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 154-236) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
+**Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 32-161 in `src/parser.rs`) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks, blockquotes processed recursively). Phase 2 (lines 163-236) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
-**Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2139-2850). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking. The `DelimiterRun` struct (lines 7-15) tracks position, count, flanking rules, and active status for each delimiter.
+**Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2086-2850). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` (line 2303) to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking. The `DelimiterRun` struct (lines 7-15) tracks position, count, flanking rules, and active status for each delimiter run.
 
 ## Critical Block Parsing Order
 
-**`src/parser.rs` lines 154-236** defines block precedence. **Reordering breaks tests.** The `parse()` method checks in this EXACT sequence:
+**`src/parser.rs` lines 163-236** defines block precedence. **Reordering breaks tests.** The `parse()` method checks in this EXACT sequence:
 
-1. Link reference definitions (skip, already collected)
-2. ATX headings (`##`, before `###` thematic breaks)
-3. Thematic breaks (`---`, before lists)
+1. Link reference definitions (skip, already collected in phase 1)
+2. ATX headings (e.g., `##`, before thematic breaks to avoid ambiguity with `###`)
+3. Thematic breaks (`---`, before lists since `---` could be list marker)
 4. Blockquotes (`>`)
-5. HTML blocks (7 types, before lists since tags look like markers)
+5. HTML blocks (7 types, before lists since tags like `<ul>` look like markers)
 6. Lists (unordered/ordered)
 7. **Fenced code** (MUST precede indented - can have 0-3 space indent)
 8. Indented code (4+ spaces)
@@ -56,7 +56,7 @@ cargo run --example check_failures        # Analyze 5 currently failing tests
 10. Setext headings (lookahead for underline)
 11. Paragraphs (fallback)
 
-**Why this order matters**: `###` could be ATX heading OR thematic break. HTML `<ul>` could be block OR list marker. Fenced code with 3 space indent must be checked before 4-space indented code.
+**Why this order matters**: `###` could be ATX heading OR thematic break. HTML tags like `<ul>` could be block OR list marker. Fenced code with 3 space indent must be checked before 4-space indented code.
 
 ## Adding Features (3-Step Pattern)
 
@@ -90,7 +90,7 @@ cargo run --example test_blockquotes   # 25 blockquote tests
 cargo run --example test_hard_breaks   # Test hard line breaks
 cargo run --example test_html_blocks   # Test HTML block parsing
 cargo run --example test_link_refs     # Test link reference definitions
-cargo run --example check_failures     # Analyze 6 currently failing tests with diffs
+cargo run --example check_failures     # Analyze 2 currently failing tests with diffs
 cargo run --example test_169           # Single-test runner (example pattern)
 # Pattern: Each example filters tests.json by .section or .example field
 # Create new examples by copying the pattern from existing ones
@@ -115,7 +115,7 @@ jq '[.[] | select(.section == "Lists")] | length' tests/data/tests.json # Sectio
 
 **Parser method naming** (find with `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`):
 - `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()` line 569, `is_fenced_code_start()` line 375)
-- `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 631, `parse_list()` line 1328)
+- `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 631, `parse_list()` line 1268)
 - `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2855, `try_parse_code_span()` line 2621)
 
 **Lookahead pattern** for indented code + setext headings (prevents premature paragraph commits):
@@ -134,13 +134,13 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 256 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (650/655 - 99.2%)
+## Current Test Coverage (653/655 - 99.7%)
 
-**Remaining failures** (5 tests across 2 categories):
+**Remaining failures** (2 tests):
 - **Lists** (1 test): Complex blockquote continuation in nested list structures (test 294)
-- **Raw HTML** (4 tests): Complex edge cases involving multi-line tags and comments (tests 618, 627, 628, 631)
+- **Raw HTML** (1 test): Multi-line tag with complex attributes and embedded tags (test 618)
 
-**Recent progress** (Oct 2025): Improved from 99.1% to 99.2% (649→650 passing). Fixed link reference fallback: when inline link parsing fails (e.g., `[foo](invalid dest)`), parser now correctly falls back to trying shortcut reference link pattern, allowing `[foo]` to match a reference definition.
+**Recent progress** (Oct 2025): Improved from 99.2% to 99.7% (650→653 passing). Fixed CDATA sections, HTML comments with special patterns (<!-->, <!--->), multi-line comment support, and improved autolink detection to avoid false positives with HTML tags containing colons in attributes.
 
 ## Debugging Workflow
 
@@ -153,13 +153,13 @@ When tests fail after changes:
 
 ## Common Pitfalls
 
-1. **Block order violations**: Adding block type in wrong position in `parse()` method (lines 154-236) breaks existing tests. The order is load-bearing.
+1. **Block order violations**: Adding block type in wrong position in `parse()` method (lines 163-236) breaks existing tests. The order is load-bearing.
 2. **Tab expansion**: Tabs are NOT 4 spaces - use `count_indent_columns()` which advances to next multiple of 4 (e.g., tab at column 2 → column 4, at column 5 → column 8)
 3. **Link refs**: Case-insensitive using Unicode case folding (`[FOO]` matches `[foo]`, `[ẞ]` matches `[SS]`), whitespace-collapsed, stored in phase 1. Normalize with `unicode_casefold::UnicodeCaseFold` trait's `case_fold()` method plus `.split_whitespace().collect::<Vec<_>>().join(" ")` pattern.
 4. **Setext headings**: Must lookahead (line 212) before committing to paragraph parse, otherwise underline becomes separate paragraph
 5. **HTML blocks**: 7 distinct start conditions (line 814) with different end conditions. Type 1 (`<script>`) ends with `</script>`, Type 6 (normal tags) ends with blank line.
-6. **List compatibility**: Compatible markers (same type/delimiter) continue list, incompatible start new list. See `ListType::is_compatible()` line 2005.
-7. **Delimiter flanking**: `*` and `_` have asymmetric rules. `_` requires punctuation before/after for certain positions (lines 2723-2783). Don't simplify this logic.
+6. **List compatibility**: Compatible markers (same type/delimiter) continue list, incompatible start new list. See `ListType::is_compatible()` line 1945.
+7. **Delimiter flanking**: `*` and `_` have asymmetric rules. `_` requires punctuation before/after for certain positions (lines 2744-2805). Don't simplify this logic.
 
 ## Key Resources
 
