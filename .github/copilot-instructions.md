@@ -1,13 +1,13 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 92.1% spec compliance (603/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 93.3% spec compliance (611/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture     # See test results + coverage (92.1%)
+cargo test -- --nocapture     # See test results + coverage (93.3%)
 echo "**bold**" | cargo run   # Test CLI parser
-cargo run --example test_emphasis  # Run 132 emphasis tests only
+cargo run --example test_emphasis  # Run 132 emphasis tests (100% passing!)
 ```
 
 **Making changes?** Follow the 3-step pattern: AST enum variant → parser method → renderer match arm. Tests track progress but never fail (non-blocking).
@@ -116,14 +116,16 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (603/655 - 92.1%)
+## Current Test Coverage (611/655 - 93.3%)
 
-**Remaining failures** (52 tests):
+**Remaining failures** (44 tests):
 - List items: Complex blockquote interactions, block-level content formatting  
-- Link/image edge cases with nested brackets and reference resolution
-- List tightness edge cases with mixed content
+- Code spans: Edge cases with backtick sequences (e.g., `\`\`\`foo\`\``)
+- Links: URI encoding edge cases
 
-**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 63: test always passes, outputs statistics to stderr. Failed examples: [109, 294, 302, 344, 348, 349, 413, 414, 417, 431]...
+**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 63: test always passes, outputs statistics to stderr. Failed examples: [294, 302, 318, 349, 505, 509, 512, 520, 521, 522]...
+
+**Recent fixes** (as of 2024): Fixed nested emphasis/strong delimiter processing by implementing proper CommonMark modulo-3 rule - all 132 emphasis tests now pass (100% coverage in that section).
 
 ## Debugging Workflow
 
