@@ -4088,42 +4088,39 @@ impl Parser {
         if i + 2 < chars.len() && chars[i] == '!' && chars[i + 1] == '-' && chars[i + 2] == '-' {
             i += 3;
             // Look for closing -->
-            // Cannot start with > or ->, cannot end with -, cannot contain --
             let comment_start = i;
 
-            // Check for invalid starts: <!--> or <!--->
+            // Special case: <!--> and <!---> are valid HTML comments per CommonMark
             if i < chars.len() && chars[i] == '>' {
-                return None; // <!--> is invalid
+                i += 1;
+                let html: String = chars[start..i].iter().collect();
+                return Some((Node::HtmlInline(html), i));
             }
             if i + 1 < chars.len() && chars[i] == '-' && chars[i + 1] == '>' {
-                return None; // <!---> is invalid
+                i += 2;
+                let html: String = chars[start..i].iter().collect();
+                return Some((Node::HtmlInline(html), i));
             }
 
+            // Look for regular closing -->
             while i < chars.len() {
                 if chars[i] == '-'
                     && i + 2 < chars.len()
                     && chars[i + 1] == '-'
                     && chars[i + 2] == '>'
                 {
-                    // Found potential closing -->
-                    // Check that comment doesn't end with - before the --
-                    if i > comment_start && chars[i - 1] == '-' {
-                        return None; // Cannot end with ---
-                    }
+                    // Found closing -->
                     i += 3;
                     let html: String = chars[start..i].iter().collect();
                     return Some((Node::HtmlInline(html), i));
                 }
-                // Check for -- which is not allowed inside comment text (except at the end)
-                if chars[i] == '-' && i + 1 < chars.len() && chars[i + 1] == '-' {
-                    // This is a -- but not followed by >
-                    if i + 2 >= chars.len() || chars[i + 2] != '>' {
-                        return None; // -- is not allowed in comment text
-                    }
-                }
-                // Cannot have newline in inline HTML
+                // Allow single newline in comments
                 if chars[i] == '\n' {
-                    return None;
+                    // Check if there's already a newline in the comment
+                    let has_newline = chars[comment_start..i].contains(&'\n');
+                    if has_newline {
+                        return None; // Can't have multiple newlines
+                    }
                 }
                 i += 1;
             }
@@ -4148,23 +4145,26 @@ impl Parser {
         }
 
         // Type 3: Declaration <!LETTER...>
-        if i < chars.len() && chars[i] == '!' {
-            if i + 1 < chars.len() && chars[i + 1].is_ascii_uppercase() {
-                i += 1;
-                while i < chars.len() {
-                    if chars[i] == '>' {
-                        i += 1;
-                        let html: String = chars[start..i].iter().collect();
-                        return Some((Node::HtmlInline(html), i));
-                    }
-                    if chars[i] == '\n' {
-                        return None;
-                    }
+        if i < chars.len()
+            && chars[i] == '!'
+            && i + 1 < chars.len()
+            && chars[i + 1].is_ascii_uppercase()
+        {
+            i += 1;
+            while i < chars.len() {
+                if chars[i] == '>' {
                     i += 1;
+                    let html: String = chars[start..i].iter().collect();
+                    return Some((Node::HtmlInline(html), i));
                 }
+                if chars[i] == '\n' {
+                    return None;
+                }
+                i += 1;
             }
             return None;
         }
+        // Fall through to check for CDATA if not a declaration
 
         // Type 4: CDATA section <![CDATA[...]]>
         if i + 7 < chars.len()
@@ -4223,18 +4223,32 @@ impl Parser {
         }
 
         // Before checking for Type 6 (open tags), exclude potential autolinks
-        // Autolinks are <URI> or <email> where URIs contain : and emails contain @
-        // Check if this looks like a potential autolink that should be handled by try_parse_autolink
+        // Autolinks are <URI> or <email> where URIs contain : early (scheme:)
+        // Check if this looks like a URI scheme (letters followed by :) or email (@)
+        // Don't confuse with HTML tags that might have : in attributes
         let mut temp_i = i;
-        while temp_i < chars.len() && chars[temp_i] != '>' && chars[temp_i] != '\n' {
+        // Check first few characters for URI scheme pattern (alphanumeric+ followed by :)
+        let mut scheme_chars = 0;
+        while temp_i < chars.len() && chars[temp_i].is_ascii_alphanumeric() && scheme_chars < 32 {
             temp_i += 1;
+            scheme_chars += 1;
         }
-        if temp_i < chars.len() && chars[temp_i] == '>' {
-            let content: String = chars[i..temp_i].iter().collect();
-            if content.contains(':') || content.contains('@') {
-                // Looks like a potential autolink, don't treat as HTML
+        if temp_i < chars.len() && chars[temp_i] == ':' && scheme_chars > 0 && scheme_chars < 32 {
+            // Looks like a URI scheme (e.g., http:, mailto:), could be autolink
+            return None;
+        }
+        // Also check for @ which indicates potential email autolink
+        temp_i = i;
+        while temp_i < chars.len()
+            && chars[temp_i] != '>'
+            && chars[temp_i] != '\n'
+            && chars[temp_i] != ' '
+        {
+            if chars[temp_i] == '@' {
+                // Contains @ early, could be email autolink
                 return None;
             }
+            temp_i += 1;
         }
 
         // Type 6: Open tag <tagname attributes...> or <tagname attributes.../>
