@@ -2782,10 +2782,42 @@ impl Parser {
         let mut i = start + 1;
 
         // Find the closing ']' for link text
+        // Code spans take precedence - must skip over them when finding matching bracket
         let mut bracket_depth = 1;
         let text_start = i;
 
         while i < chars.len() {
+            // Check for code spans (they take precedence per Rule 17)
+            if chars[i] == '`' {
+                // Count opening backticks
+                let mut backtick_count = 0;
+                while i < chars.len() && chars[i] == '`' {
+                    backtick_count += 1;
+                    i += 1;
+                }
+
+                // Look for matching closing backticks
+                while i < chars.len() {
+                    if chars[i] == '`' {
+                        let mut closing_count = 0;
+                        while i < chars.len() && chars[i] == '`' {
+                            closing_count += 1;
+                            i += 1;
+                        }
+
+                        if closing_count == backtick_count {
+                            // Found matching closing backticks - code span is complete
+                            break;
+                        }
+                        // Not a match, continue looking
+                    } else {
+                        i += 1;
+                    }
+                }
+                // Continue from current position (after code span or end of string)
+                continue;
+            }
+
             if chars[i] == '[' {
                 bracket_depth += 1;
             } else if chars[i] == ']' {
@@ -3564,8 +3596,10 @@ impl Parser {
     }
 
     fn url_encode_autolink(&self, text: &str) -> String {
-        // Percent-encode backslashes as %5C (spec says backslash-escapes don't work in autolinks)
-        text.replace('\\', "%5C")
+        // Percent-encode special characters per CommonMark spec
+        // Backslashes become %5C (backslash-escapes don't work in autolinks)
+        // Backticks become %60
+        text.replace('\\', "%5C").replace('`', "%60")
     }
 
     /// Try to parse a link reference definition

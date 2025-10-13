@@ -27,7 +27,7 @@ cargo run --example test_emphasis  # Run 132 emphasis tests only
 
 **Why two-phase parsing?** Link references `[label]: destination` can appear anywhere but must be resolved during inline parsing. Phase 1 (lines 30-146) scans entire input to collect all references into `HashMap<String, (String, Option<String>)>`, skipping contexts where they don't apply (code blocks, already-parsed HTML blocks). Phase 2 (lines 147-235) parses blocks using these pre-collected references for single-pass inline link resolution. This prevents backtracking when encountering `[text][ref]` syntax.
 
-**Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 1955-2342). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking.
+**Delimiter stack pattern**: Emphasis/strong parsing uses a two-pass algorithm (lines 2102-2489). Pass 1 collects delimiter runs (`*`, `_`) with flanking information into a stack. Pass 2 processes the stack using `process_emphasis()` to match openers with closers, handling precedence rules (strong before emphasis, left-to-right matching). This implements CommonMark's complex emphasis nesting rules without backtracking.
 
 ## Critical Block Parsing Order
 
@@ -98,7 +98,7 @@ jq -r '.[].section' tests/data/tests.json | sort | uniq -c | sort -rn  # Count b
 **Parser method naming** (find with `grep -n "fn is_\|fn parse_\|fn try_parse_" src/parser.rs`):
 - `is_*`: Predicates returning `bool` or `Option<T>` (e.g., `is_thematic_break()` line 560, `is_fenced_code_start()` line 366)
 - `parse_*`: Block parsers returning `(Node, usize)` where `usize` = lines consumed (e.g., `parse_blockquote()` line 622, `parse_list()` line 1295)
-- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2628, `try_parse_code_span()` line 2465)
+- `try_parse_*`: Inline parsers returning `Option<(Node, usize)>` where `usize` = chars consumed (e.g., `try_parse_link()` line 2775, `try_parse_code_span()` line 2612)
 
 **Lookahead pattern** for indented code + setext headings (prevents premature paragraph commits):
 ```rust
@@ -114,7 +114,7 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 - Block tags: `<p>...</p>\n`, `<blockquote>\n...\n</blockquote>\n`
 - Conditional attributes: `<ol start="5">` only if start ≠ 1 (line 57), `<code class="language-rust">` only if info string present (line 36)
 
-**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 245) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
+**Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
 ## Current Test Coverage (603/655 - 92.1%)
 
@@ -141,8 +141,8 @@ When tests fail after changes:
 3. **Link refs**: Case-insensitive (`[FOO]` matches `[foo]`), whitespace-collapsed, stored in phase 1. Normalize with `.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")` pattern.
 4. **Setext headings**: Must lookahead (line 222) before committing to paragraph parse, otherwise underline becomes separate paragraph
 5. **HTML blocks**: 7 distinct start conditions (line 805) with different end conditions. Type 1 (`<script>`) ends with `</script>`, Type 6 (normal tags) ends with blank line.
-6. **List compatibility**: Compatible markers (same type/delimiter) continue list, incompatible start new list. See `ListType::is_compatible()` line 1819.
-7. **Delimiter flanking**: `*` and `_` have asymmetric rules. `_` requires punctuation before/after for certain positions (lines 2059-2079). Don't simplify this logic.
+6. **List compatibility**: Compatible markers (same type/delimiter) continue list, incompatible start new list. See `ListType::is_compatible()` line 1976.
+7. **Delimiter flanking**: `*` and `_` have asymmetric rules. `_` requires punctuation before/after for certain positions (lines 2203-2229). Don't simplify this logic.
 
 ## Key Resources
 
