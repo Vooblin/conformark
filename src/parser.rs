@@ -2618,10 +2618,29 @@ impl Parser {
     }
 
     /// URL-encode a string for use in href attributes (percent-encode non-ASCII and special chars)
+    /// Preserves already percent-encoded sequences
     fn url_encode(&self, text: &str) -> String {
         let mut result = String::new();
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
 
-        for ch in text.chars() {
+        while i < chars.len() {
+            let ch = chars[i];
+
+            // Check if this is an already percent-encoded sequence (%HH)
+            if ch == '%'
+                && i + 2 < chars.len()
+                && chars[i + 1].is_ascii_hexdigit()
+                && chars[i + 2].is_ascii_hexdigit()
+            {
+                // Preserve existing percent-encoding
+                result.push('%');
+                result.push(chars[i + 1]);
+                result.push(chars[i + 2]);
+                i += 3;
+                continue;
+            }
+
             // ASCII alphanumeric and safe URL characters pass through
             if ch.is_ascii_alphanumeric()
                 || matches!(
@@ -2650,11 +2669,13 @@ impl Parser {
                 )
             {
                 result.push(ch);
+                i += 1;
             } else {
                 // Percent-encode as UTF-8 bytes
                 for byte in ch.to_string().as_bytes() {
                     result.push_str(&format!("%{:02X}", byte));
                 }
+                i += 1;
             }
         }
 
@@ -2988,8 +3009,12 @@ impl Parser {
                     paren_depth -= 1;
                 } else if chars[i] == '\\' && i + 1 < chars.len() {
                     i += 1; // Skip escaped character
-                } else if chars[i].is_whitespace() {
-                    break; // Whitespace ends destination
+                } else if chars[i] == ' '
+                    || chars[i] == '\t'
+                    || chars[i] == '\n'
+                    || chars[i] == '\r'
+                {
+                    break; // ASCII whitespace ends destination (not Unicode whitespace like NBSP)
                 }
                 i += 1;
             }
@@ -3000,13 +3025,13 @@ impl Parser {
             destination = self.url_encode(&entity_decoded);
 
             // Check for invalid characters in destination (spaces outside parens)
-            if entity_decoded.contains(|c: char| c.is_whitespace()) && paren_depth == 0 {
-                return None; // Invalid destination
+            if entity_decoded.contains([' ', '\t', '\n', '\r']) && paren_depth == 0 {
+                return None; // Invalid destination with ASCII whitespace
             }
         }
 
-        // Skip whitespace
-        while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t') {
+        // Skip whitespace between destination and title (including Unicode whitespace)
+        while i < chars.len() && chars[i].is_whitespace() && chars[i] != '\n' && chars[i] != '\r' {
             i += 1;
         }
 
@@ -3243,8 +3268,12 @@ impl Parser {
                     paren_depth -= 1;
                 } else if chars[i] == '\\' && i + 1 < chars.len() {
                     i += 1; // Skip escaped character
-                } else if chars[i].is_whitespace() {
-                    break; // Whitespace ends destination
+                } else if chars[i] == ' '
+                    || chars[i] == '\t'
+                    || chars[i] == '\n'
+                    || chars[i] == '\r'
+                {
+                    break; // ASCII whitespace ends destination (not Unicode whitespace like NBSP)
                 }
                 i += 1;
             }
@@ -3255,13 +3284,13 @@ impl Parser {
             destination = self.url_encode(&entity_decoded);
 
             // Check for invalid characters in destination (spaces outside parens)
-            if entity_decoded.contains(|c: char| c.is_whitespace()) && paren_depth == 0 {
-                return None; // Invalid destination
+            if entity_decoded.contains([' ', '\t', '\n', '\r']) && paren_depth == 0 {
+                return None; // Invalid destination with ASCII whitespace
             }
         }
 
-        // Skip whitespace
-        while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t') {
+        // Skip whitespace between destination and title (including Unicode whitespace)
+        while i < chars.len() && chars[i].is_whitespace() && chars[i] != '\n' && chars[i] != '\r' {
             i += 1;
         }
 
@@ -3592,6 +3621,7 @@ impl Parser {
             "ClockwiseContourIntegral" => "∲", // ∲
             "ngE" => "≧̸",                      // ≧̸ (combining character)
             "ouml" => "ö",                     // ö
+            "auml" => "ä",                     // ä
             _ => return None,
         };
 

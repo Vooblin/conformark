@@ -1,11 +1,11 @@
 # Copilot Instructions for Conformark
 
-A CommonMark v0.31.2 parser in Rust (edition 2024) with 94.2% spec compliance (617/655 tests passing).
+A CommonMark v0.31.2 parser in Rust (edition 2024) with 96.2% spec compliance (630/655 tests passing).
 
 ## Quick Start (First 60 Seconds)
 
 ```bash
-cargo test -- --nocapture     # See test results + coverage (94.2%)
+cargo test -- --nocapture     # See test results + coverage (96.2%)
 echo "**bold**" | cargo run   # Test CLI parser
 cargo run --example test_emphasis  # Run 132 emphasis tests (100% passing!)
 ```
@@ -116,16 +116,16 @@ if j < lines.len() && self.is_indented_code_line(lines[j]) {
 
 **Tab handling**: Tabs advance to **next multiple of 4 columns** (NOT fixed 4 spaces). The `count_indent_columns()` method (line 247 in `src/parser.rs`) implements spec-compliant column counting. Critical for indented code detection and list item continuation.
 
-## Current Test Coverage (617/655 - 94.2%)
+## Current Test Coverage (630/655 - 96.2%)
 
-**Remaining failures** (38 tests):
-- List items: Complex blockquote interactions, block-level content formatting  
-- Code spans: Edge cases with backtick sequences
-- Links: URI encoding edge cases, multi-line destinations, HTML tag interference
+**Remaining failures** (25 tests):
+- Links: Multi-line destinations, HTML tag interference in link text
+- Lists: Complex blockquote interactions, edge cases in tight/loose detection
+- Code spans: Backtick edge cases
 
-**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Failed examples: [294, 302, 318, 505, 509, 512, 526, 528, 538, 540]...
+**Test Philosophy**: Tests are **non-blocking tracking tests** - they never fail CI but report detailed progress. See `tests/spec_tests.rs` line 62: test always passes, outputs statistics to stderr. Failed examples: [294, 302, 318, 512, 526, 528, 538, 540, 542, 548]...
 
-**Recent fixes** (as of 2024): Fixed nested emphasis/strong delimiter processing by implementing proper CommonMark modulo-3 rule - all 132 emphasis tests now pass (100% coverage in that section).
+**Recent progress** (Oct 2025): Improved from 95.9% to 96.2% (628→630 passing). Fixed URI encoding to preserve percent-encoded sequences and handle Unicode whitespace correctly in link destinations.
 
 ## Debugging Workflow
 
